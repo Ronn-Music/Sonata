@@ -1864,16 +1864,20 @@ async function _saveGdriveToken(accessToken, expiresIn, emailHint) {
 async function scanGoogleDrive(token) {
   showToast('⏳ Escaneando Google Drive...');
   try {
-    // Paginar para obtener todos los archivos (máx 1000 por request)
+    // ── PASO 1: Obtener TODOS los archivos paginando ──────────────────────
     let allFiles = [];
     let pageToken = null;
+    let pagina = 1;
     const tipos = "(mimeType='audio/mpeg' or mimeType='audio/flac' or mimeType='audio/wav' or mimeType='audio/ogg' or mimeType='audio/x-m4a' or mimeType='audio/mp4')";
 
     do {
-      let url = 'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(tipos)
-        + '&fields=nextPageToken,files(id,name,size,mimeType)&pageSize=1000';
+      let url = 'https://www.googleapis.com/drive/v3/files'
+        + '?q='      + encodeURIComponent(tipos)
+        + '&fields=' + encodeURIComponent('nextPageToken,files(id,name,mimeType)')
+        + '&pageSize=1000';
       if (pageToken) url += '&pageToken=' + encodeURIComponent(pageToken);
 
+      showToast('⏳ Escaneando Drive... página ' + pagina);
       const res  = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
       const data = await res.json();
 
@@ -1883,8 +1887,13 @@ async function scanGoogleDrive(token) {
         return;
       }
 
-      if (data.files) allFiles = allFiles.concat(data.files);
+      if (data.files && data.files.length > 0) {
+        allFiles = allFiles.concat(data.files);
+        console.log('Página ' + pagina + ': ' + data.files.length + ' archivos — total acumulado: ' + allFiles.length);
+      }
+
       pageToken = data.nextPageToken || null;
+      pagina++;
 
     } while (pageToken);
 
@@ -1893,12 +1902,24 @@ async function scanGoogleDrive(token) {
       return;
     }
 
-    console.log('Drive: encontrados ' + allFiles.length + ' archivos de audio');
-    showToast('⏳ Guardando ' + allFiles.length + ' canciones...');
+    console.log('Drive: total encontrados ' + allFiles.length + ' archivos de audio');
+    showToast('⏳ ' + allFiles.length + ' canciones encontradas — guardando...');
 
-    // Insertar en lotes de 50 para no saturar
+    // ── PASO 2: Borrar canciones previas de este usuario/proveedor ────────
+    // Así evitamos duplicados y el límite de ignoreDuplicates
+    const { error: delError } = await _supabase.from('songs')
+      .delete()
+      .eq('user_id', currentUser.id)
+      .eq('cloud_provider', 'gdrive');
+
+    if (delError) {
+      console.warn('No se pudieron borrar canciones previas:', delError.message);
+      // Continuar de todas formas
+    }
+
+    // ── PASO 3: Insertar todas en lotes de 100 ───────────────────────────
     let guardadas = 0, errores = 0;
-    const BATCH = 50;
+    const BATCH = 100;
 
     for (let i = 0; i < allFiles.length; i += BATCH) {
       const lote = allFiles.slice(i, i + BATCH);
@@ -1907,7 +1928,6 @@ async function scanGoogleDrive(token) {
         const partes  = nombre.split(' - ');
         const artista = partes.length > 1 ? partes[0].trim() : 'Desconocido';
         const titulo  = partes.length > 1 ? partes.slice(1).join(' - ').trim() : nombre;
-
         return {
           user_id:        currentUser.id,
           title:          titulo,
@@ -1920,20 +1940,18 @@ async function scanGoogleDrive(token) {
         };
       });
 
-      // upsert por lote — si file_path ya existe no duplica
-      const { error } = await _supabase.from('songs')
-        .upsert(rows, { onConflict: 'user_id,file_path', ignoreDuplicates: true });
+      const { error } = await _supabase.from('songs').insert(rows);
 
       if (error) {
-        console.error('Error lote ' + i + ':', error.message);
+        console.error('Error lote ' + i + '-' + (i+BATCH) + ':', error.message);
         errores += lote.length;
       } else {
         guardadas += lote.length;
       }
 
-      // Actualizar progreso en toast cada 5 lotes
-      if ((i / BATCH) % 5 === 0) {
-        showToast('⏳ Guardando... ' + Math.min(i + BATCH, allFiles.length) + '/' + allFiles.length);
+      // Mostrar progreso cada 5 lotes
+      if (i % (BATCH * 5) === 0 && i > 0) {
+        showToast('⏳ Guardando ' + guardadas + '/' + allFiles.length + '...');
       }
     }
 
