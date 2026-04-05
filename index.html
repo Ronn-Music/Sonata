@@ -1692,7 +1692,7 @@ function connectGoogleDrivePopup() {
   sessionStorage.setItem('gdrive_oauth_nonce', nonce);
 
   const redirectUri = 'https://sonata-ecru.vercel.app';   // ← exacto, igual al registrado
-  const scope       = 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/oauth2/v2/userinfo.email';
+  const scope       = 'https://www.googleapis.com/auth/drive.readonly email profile';
   const authUrl     = 'https://accounts.google.com/o/oauth2/v2/auth'
     + '?client_id='     + encodeURIComponent(GOOGLE_CLIENT_ID)
     + '&redirect_uri='  + encodeURIComponent(redirectUri)
