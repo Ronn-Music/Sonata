@@ -1,0 +1,1404 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sonata — Tu música en las nubes</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --bg2: #111118;
+    --bg3: #1a1a24;
+    --bg4: #22222f;
+    --border: #2a2a3a;
+    --accent: #7c5cfc;
+    --accent2: #a78bfa;
+    --accent3: #38bdf8;
+    --green: #34d399;
+    --red: #f87171;
+    --yellow: #fbbf24;
+    --text: #f0f0ff;
+    --text2: #a0a0c0;
+    --text3: #606080;
+    --card: #13131c;
+    --player-h: 90px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  h1,h2,h3,h4 { font-family: 'Syne', sans-serif; }
+
+  .screen { display: none; width: 100%; height: 100%; }
+  .screen.active { display: flex; }
+
+  /* ══════════════════════════════════════
+     AUTH SCREEN
+  ══════════════════════════════════════ */
+  #authScreen {
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    height: 100vh;
+    background: var(--bg);
+    position: relative;
+    overflow-y: auto;
+    padding: 28px 16px 28px;
+  }
+
+  #authScreen::before {
+    content: '';
+    position: absolute;
+    width: 700px; height: 700px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(124,92,252,0.13) 0%, transparent 70%);
+    top: -250px; left: -150px;
+    pointer-events: none;
+  }
+  #authScreen::after {
+    content: '';
+    position: absolute;
+    width: 500px; height: 500px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(56,189,248,0.09) 0%, transparent 70%);
+    bottom: -150px; right: -80px;
+    pointer-events: none;
+  }
+
+  /* LOGO */
+  .auth-logo-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-bottom: 16px;
+    position: relative;
+    z-index: 1;
+  }
+  .auth-logo-img {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    object-fit: cover;
+    margin-bottom: 8px;
+    box-shadow: 0 0 0 3px rgba(167,139,250,0.3), 0 6px 22px rgba(124,92,252,0.35);
+  }
+  .auth-logo-name {
+    font-family: 'Syne', sans-serif;
+    font-size: 1.7rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, #a78bfa, #38bdf8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: -1px;
+  }
+  .auth-tagline {
+    color: var(--text3);
+    font-size: 0.72rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-top: 1px;
+  }
+
+  /* AUTH BOX */
+  .auth-box {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 22px 28px;
+    width: 400px;
+    position: relative;
+    z-index: 1;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+
+  .auth-tabs {
+    display: flex;
+    gap: 4px;
+    background: var(--bg3);
+    border-radius: 10px;
+    padding: 3px;
+    margin-bottom: 16px;
+  }
+  .auth-tab {
+    flex: 1;
+    padding: 7px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text3);
+    font-family: 'Syne', sans-serif;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .auth-tab.active { background: var(--accent); color: white; }
+
+  /* SOCIAL BUTTONS */
+  .social-section {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    margin-bottom: 14px;
+  }
+  .social-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg3);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.18s;
+    width: 100%;
+    text-align: left;
+  }
+  .social-btn:hover { border-color: var(--accent); background: rgba(124,92,252,0.08); }
+  .social-btn svg, .social-btn img { flex-shrink: 0; }
+  .social-btn span { flex: 1; }
+
+  .divider {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .divider-line { flex: 1; height: 1px; background: var(--border); }
+  .divider-text { font-size: 0.72rem; color: var(--text3); white-space: nowrap; }
+
+  /* FORM */
+  .auth-form { display: flex; flex-direction: column; gap: 10px; }
+  .auth-form.hidden { display: none; }
+
+  .field-label {
+    font-size: 0.7rem;
+    color: var(--text3);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+    display: block;
+  }
+  .auth-input {
+    width: 100%;
+    padding: 9px 13px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    color: var(--text);
+    font-size: 0.86rem;
+    font-family: 'DM Sans', sans-serif;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .auth-input:focus { border-color: var(--accent); }
+
+  .btn-primary {
+    padding: 10px;
+    background: var(--accent);
+    border: none;
+    border-radius: 9px;
+    color: white;
+    font-family: 'Syne', sans-serif;
+    font-size: 0.86rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-top: 2px;
+    letter-spacing: 0.3px;
+  }
+  .btn-primary:hover { background: #6b4de6; transform: translateY(-1px); box-shadow: 0 8px 25px rgba(124,92,252,0.4); }
+  .btn-primary:active { transform: translateY(0); }
+
+  .auth-error {
+    color: var(--red);
+    font-size: 0.75rem;
+    text-align: center;
+    min-height: 14px;
+  }
+
+  /* ══════════════════════════════════════
+     MAIN APP
+  ══════════════════════════════════════ */
+  #appScreen { flex-direction: column; height: 100vh; }
+
+  .app-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    height: calc(100vh - var(--player-h));
+  }
+
+  /* SIDEBAR */
+  .sidebar {
+    width: 240px;
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    overflow-y: auto;
+  }
+
+  .sidebar-logo {
+    padding: 18px 20px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-logo-img {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    object-fit: cover;
+  }
+  .sidebar-logo-name {
+    font-family: 'Syne', sans-serif;
+    font-size: 1.15rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, #a78bfa, #38bdf8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: -0.5px;
+  }
+
+  .sidebar-section { padding: 14px 0; border-bottom: 1px solid var(--border); }
+  .sidebar-section-title {
+    font-size: 0.63rem;
+    color: var(--text3);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    padding: 0 20px 8px;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 20px;
+    color: var(--text2);
+    cursor: pointer;
+    transition: all 0.15s;
+    font-size: 0.87rem;
+    border-left: 3px solid transparent;
+  }
+  .nav-item:hover { color: var(--text); background: rgba(124,92,252,0.07); }
+  .nav-item.active { color: var(--accent2); border-left-color: var(--accent); background: rgba(124,92,252,0.12); }
+
+  .sidebar-clouds { padding: 14px 0; flex: 1; }
+  .cloud-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 20px; cursor: pointer; transition: all 0.15s;
+    font-size: 0.83rem; color: var(--text2);
+  }
+  .cloud-item:hover { background: rgba(255,255,255,0.04); color: var(--text); }
+  .cloud-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .cloud-dot.connected { background: var(--green); box-shadow: 0 0 5px var(--green); }
+  .cloud-dot.disconnected { background: var(--text3); }
+
+  .sidebar-user {
+    padding: 14px 18px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .user-avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), var(--accent3));
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.82rem;
+    flex-shrink: 0; overflow: hidden;
+  }
+  .user-avatar img { width: 100%; height: 100%; object-fit: cover; }
+  .user-info { flex: 1; min-width: 0; }
+  .user-name { font-size: 0.8rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .user-plan { font-size: 0.68rem; color: var(--accent2); }
+  .logout-btn {
+    background: none; border: none; color: var(--text3);
+    cursor: pointer; padding: 4px; border-radius: 6px;
+    transition: color 0.15s; display: flex;
+  }
+  .logout-btn:hover { color: var(--red); }
+
+  /* MAIN */
+  .main { flex: 1; overflow-y: auto; background: var(--bg); }
+  .main::-webkit-scrollbar { width: 6px; }
+  .main::-webkit-scrollbar-track { background: transparent; }
+  .main::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .view { display: none; padding: 30px; }
+  .view.active { display: block; }
+
+  .view-header {
+    display: flex; align-items: center;
+    justify-content: space-between; margin-bottom: 26px;
+  }
+  .view-title { font-size: 1.55rem; font-weight: 800; letter-spacing: -0.5px; }
+  .view-subtitle { color: var(--text3); font-size: 0.83rem; margin-top: 3px; }
+
+  .search-bar {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 10px; padding: 9px 15px; width: 270px;
+  }
+  .search-bar svg { color: var(--text3); flex-shrink: 0; }
+  .search-bar input {
+    background: none; border: none; outline: none;
+    color: var(--text); font-size: 0.86rem;
+    font-family: 'DM Sans', sans-serif; width: 100%;
+  }
+  .search-bar input::placeholder { color: var(--text3); }
+
+  /* STATS */
+  .stats-row { display: grid; grid-template-columns: repeat(4,1fr); gap: 13px; margin-bottom: 26px; }
+  .stat-card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 18px; transition: border-color 0.2s;
+  }
+  .stat-card:hover { border-color: var(--accent); }
+  .stat-label { font-size: 0.7rem; color: var(--text3); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 8px; }
+  .stat-value { font-family: 'Syne', sans-serif; font-size: 1.7rem; font-weight: 800; }
+  .stat-sub { font-size: 0.73rem; color: var(--text3); margin-top: 3px; }
+
+  .section-title {
+    font-size: 0.95rem; font-weight: 700; margin-bottom: 13px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .see-all {
+    margin-left: auto; font-size: 0.73rem; color: var(--accent2);
+    cursor: pointer; font-weight: 400; font-family: 'DM Sans', sans-serif;
+  }
+  .see-all:hover { text-decoration: underline; }
+
+  /* ALBUMS GRID */
+  .albums-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(150px,1fr)); gap: 14px; margin-bottom: 28px; }
+  .album-card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden; cursor: pointer; transition: all 0.2s;
+  }
+  .album-card:hover { border-color: var(--accent); transform: translateY(-3px); box-shadow: 0 12px 30px rgba(0,0,0,0.4); }
+  .album-art {
+    width: 100%; aspect-ratio: 1;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 2.6rem; position: relative; overflow: hidden;
+  }
+  .album-art::after {
+    content: '▶'; position: absolute; inset: 0;
+    background: rgba(0,0,0,0.5); display: flex;
+    align-items: center; justify-content: center;
+    font-size: 1.4rem; opacity: 0; transition: opacity 0.2s; color: white;
+  }
+  .album-card:hover .album-art::after { opacity: 1; }
+  .album-info { padding: 11px; }
+  .album-name { font-size: 0.8rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .album-artist { font-size: 0.73rem; color: var(--text3); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .album-count { font-size: 0.68rem; color: var(--text3); margin-top: 2px; }
+
+  /* SONGS LIST */
+  .songs-list { background: var(--card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; margin-bottom: 26px; }
+  .songs-list-header {
+    display: grid; grid-template-columns: 40px 1fr 200px 100px 80px;
+    padding: 9px 16px; border-bottom: 1px solid var(--border);
+    font-size: 0.68rem; color: var(--text3); text-transform: uppercase; letter-spacing: 1px;
+  }
+  .song-row {
+    display: grid; grid-template-columns: 40px 1fr 200px 100px 80px;
+    padding: 9px 16px; align-items: center; cursor: pointer;
+    transition: background 0.15s; border-bottom: 1px solid rgba(255,255,255,0.03);
+  }
+  .song-row:hover { background: rgba(124,92,252,0.08); }
+  .song-row.playing { background: rgba(124,92,252,0.15); }
+  .song-num { font-size: 0.78rem; color: var(--text3); }
+  .song-row.playing .song-num { color: var(--accent2); }
+  .song-info-cell { display: flex; align-items: center; gap: 11px; min-width: 0; }
+  .song-mini-art { width: 34px; height: 34px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 1rem; flex-shrink: 0; }
+  .song-title { font-size: 0.83rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .song-row.playing .song-title { color: var(--accent2); }
+  .song-artist-cell { font-size: 0.78rem; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .song-album-cell { font-size: 0.78rem; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .song-dur { font-size: 0.78rem; color: var(--text3); text-align: right; }
+  .song-cloud-badge {
+    display: inline-block; font-size: 0.62rem; padding: 1px 6px;
+    border-radius: 20px; background: var(--bg3); color: var(--text3);
+    margin-left: 5px; vertical-align: middle;
+  }
+
+  /* CLOUDS VIEW */
+  .clouds-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(270px,1fr)); gap: 14px; }
+  .cloud-card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 22px; transition: all 0.2s; }
+  .cloud-card:hover { border-color: var(--accent); }
+  .cloud-card-header { display: flex; align-items: center; gap: 13px; margin-bottom: 15px; }
+  .cloud-icon { width: 46px; height: 46px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; }
+  .cloud-card-name { font-family: 'Syne', sans-serif; font-size: 0.95rem; font-weight: 700; }
+  .cloud-card-status { font-size: 0.76rem; margin-top: 3px; }
+  .status-connected { color: var(--green); }
+  .status-disconnected { color: var(--text3); }
+  .cloud-stats { display: flex; gap: 18px; margin-bottom: 14px; }
+  .cloud-stat-item { font-size: 0.76rem; color: var(--text3); }
+  .cloud-stat-item strong { color: var(--text); font-weight: 600; display: block; font-size: 0.95rem; }
+  .btn-connect {
+    width: 100%; padding: 10px; border-radius: 9px;
+    border: 1px solid var(--accent); background: transparent;
+    color: var(--accent2); font-family: 'Syne', sans-serif;
+    font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: all 0.2s;
+  }
+  .btn-connect:hover { background: var(--accent); color: white; }
+  .btn-disconnect {
+    width: 100%; padding: 10px; border-radius: 9px;
+    border: 1px solid var(--border); background: transparent;
+    color: var(--text3); font-family: 'Syne', sans-serif;
+    font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: all 0.2s;
+  }
+  .btn-disconnect:hover { border-color: var(--red); color: var(--red); }
+  .btn-sync {
+    width: 100%; padding: 10px; border-radius: 9px; border: none;
+    background: var(--accent); color: white; font-family: 'Syne', sans-serif;
+    font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: all 0.2s; margin-bottom: 7px;
+  }
+  .btn-sync:hover { background: #6b4de6; }
+
+  /* MODAL */
+  .oauth-modal {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7); z-index: 1000;
+    align-items: center; justify-content: center; backdrop-filter: blur(4px);
+  }
+  .oauth-modal.show { display: flex; }
+  .oauth-box {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 20px; padding: 34px; width: 400px; text-align: center;
+    box-shadow: 0 40px 100px rgba(0,0,0,0.6);
+  }
+  .oauth-icon { font-size: 2.8rem; margin-bottom: 14px; }
+  .oauth-title { font-family: 'Syne', sans-serif; font-size: 1.15rem; font-weight: 700; margin-bottom: 7px; }
+  .oauth-desc { color: var(--text3); font-size: 0.83rem; margin-bottom: 20px; line-height: 1.6; }
+  .oauth-perms { background: var(--bg3); border-radius: 10px; padding: 14px; margin-bottom: 20px; text-align: left; }
+  .oauth-perm-item { display: flex; align-items: center; gap: 9px; font-size: 0.8rem; color: var(--text2); padding: 4px 0; }
+  .oauth-perm-item::before { content: '✓'; color: var(--green); font-weight: 700; }
+  .oauth-actions { display: flex; gap: 10px; }
+  .oauth-cancel {
+    flex: 1; padding: 11px; border: 1px solid var(--border); border-radius: 9px;
+    background: transparent; color: var(--text2); font-family: 'Syne', sans-serif;
+    font-size: 0.83rem; cursor: pointer; transition: all 0.15s;
+  }
+  .oauth-cancel:hover { border-color: var(--text2); }
+  .oauth-confirm {
+    flex: 2; padding: 11px; border: none; border-radius: 9px;
+    background: var(--accent); color: white; font-family: 'Syne', sans-serif;
+    font-size: 0.83rem; font-weight: 600; cursor: pointer; transition: all 0.15s;
+  }
+  .oauth-confirm:hover { background: #6b4de6; }
+
+  /* PLAYLISTS */
+  .playlists-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(195px,1fr)); gap: 13px; }
+  .playlist-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; cursor: pointer; transition: all 0.2s; }
+  .playlist-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .playlist-art { width: 100%; aspect-ratio: 1; display: grid; grid-template-columns: 1fr 1fr; overflow: hidden; }
+  .playlist-art-q { display: flex; align-items: center; justify-content: center; font-size: 1.7rem; }
+  .playlist-info { padding: 13px; }
+  .playlist-name { font-size: 0.83rem; font-weight: 600; margin-bottom: 2px; }
+  .playlist-count { font-size: 0.73rem; color: var(--text3); }
+  .new-playlist-btn {
+    background: var(--card); border: 2px dashed var(--border);
+    border-radius: 14px; cursor: pointer; display: flex;
+    flex-direction: column; align-items: center; justify-content: center;
+    gap: 10px; color: var(--text3); font-size: 0.83rem; min-height: 195px; transition: all 0.2s;
+  }
+  .new-playlist-btn:hover { border-color: var(--accent); color: var(--accent2); }
+
+  /* PLAYER BAR */
+  .player-bar {
+    height: var(--player-h); background: var(--bg2);
+    border-top: 1px solid var(--border);
+    display: flex; align-items: center;
+    padding: 0 22px; gap: 18px; flex-shrink: 0; z-index: 10;
+  }
+
+  .now-playing { display: flex; align-items: center; gap: 13px; width: 270px; flex-shrink: 0; }
+  .np-art { width: 48px; height: 48px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; flex-shrink: 0; background: var(--bg3); }
+  .np-info { min-width: 0; }
+  .np-title { font-size: 0.83rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .np-artist { font-size: 0.73rem; color: var(--text3); margin-top: 2px; }
+  .np-heart { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 1.05rem; transition: color 0.15s; padding: 4px; }
+  .np-heart.liked { color: var(--red); }
+  .np-heart:hover { color: var(--red); }
+
+  .player-controls { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 7px; }
+  .ctrl-btns { display: flex; align-items: center; gap: 5px; }
+  .ctrl-btn { background: none; border: none; color: var(--text3); cursor: pointer; padding: 7px; border-radius: 50%; transition: all 0.15s; display: flex; align-items: center; justify-content: center; }
+  .ctrl-btn:hover { color: var(--text); background: rgba(255,255,255,0.06); }
+  .ctrl-btn.active { color: var(--accent2); }
+  .ctrl-play { background: var(--text) !important; color: var(--bg) !important; width: 36px; height: 36px; border-radius: 50%; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; margin: 0 3px; }
+  .ctrl-play:hover { transform: scale(1.06); background: white !important; }
+
+  .progress-row { display: flex; align-items: center; gap: 9px; width: 100%; max-width: 480px; }
+  .prog-time { font-size: 0.7rem; color: var(--text3); width: 34px; text-align: center; font-variant-numeric: tabular-nums; }
+  .prog-bar { flex: 1; height: 4px; background: var(--bg4); border-radius: 2px; cursor: pointer; position: relative; overflow: hidden; }
+  .prog-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); border-radius: 2px; transition: width 0.5s linear; }
+
+  .vol-area { display: flex; align-items: center; gap: 9px; width: 170px; flex-shrink: 0; justify-content: flex-end; }
+  .vol-bar { width: 85px; height: 4px; background: var(--bg4); border-radius: 2px; cursor: pointer; }
+  .vol-fill { height: 100%; background: var(--text3); border-radius: 2px; }
+
+  /* TOAST */
+  .toast {
+    position: fixed; bottom: 105px; left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 10px; padding: 11px 18px; font-size: 0.83rem;
+    opacity: 0; pointer-events: none; transition: all 0.3s;
+    z-index: 500; white-space: nowrap;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* EQ */
+  .eq-bars { display: flex; align-items: flex-end; gap: 2px; height: 13px; }
+  .eq-bar { width: 3px; background: var(--accent2); border-radius: 1px; animation: eq 0.8s ease-in-out infinite alternate; }
+  .eq-bar:nth-child(1) { animation-delay: 0s; }
+  .eq-bar:nth-child(2) { animation-delay: 0.15s; }
+  .eq-bar:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes eq { from { height: 3px; } to { height: 13px; } }
+
+  .sidebar::-webkit-scrollbar { width: 4px; }
+  .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════
+     AUTH SCREEN
+══════════════════════════════════════ -->
+<div id="authScreen" class="screen active">
+
+  <div class="auth-logo-wrap">
+    <img class="auth-logo-img" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAwwAAAL6CAYAAACbw9HLAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAAGYktHRAD/AP8A/6C9p5MAAAAHdElNRQfqBAQXCh4YOMPPAAAAAW9yTlQBz6J3mgAAgABJREFUeNp0/duSLcuOHIYCiMjaZPMms/MqiWLzYvoAtloiJf3/H0mrMiJwHgB3IHJuTbNte601q8bIjAsuDodD//U//rOfc0RVxd1FRER1iPuWMYacI+IuMsaQLUfGGCIisvcWMxP3LeeIqKrgj+a/q8b/+z5iZvF35mI65Zwjrkd+95Ih8d02+BEyxhB3F3cXdROVIa4iR0XMD/8uPtfEzOSsLWIqqip7bzl6RETEVzyr5TOqjHx2z3fO/z5MVFXevUVEZPmK9xCTc/Kz3EVOfu+If/fl8Z4qYkO5lr5Proof..." alt="Sonata" onerror="this.style.display='none'">
+    <div class="auth-logo-name">Sonata</div>
+    <div class="auth-tagline">Tu música. Tus nubes.</div>
+  </div>
+
+  <div class="auth-box">
+    <div class="auth-tabs">
+      <button class="auth-tab active" onclick="switchTab('login')">Iniciar sesión</button>
+      <button class="auth-tab" onclick="switchTab('register')">Registrarse</button>
+    </div>
+
+    <!-- SOCIAL LOGIN BUTTONS -->
+    <div class="social-section">
+
+      <!-- Google -->
+      <button class="social-btn" onclick="socialLogin('google')">
+        <svg width="18" height="18" viewBox="0 0 24 24">
+          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+        </svg>
+        <span>Continuar con Google</span>
+      </button>
+
+      <!-- Microsoft / Outlook -->
+      <button class="social-btn" onclick="socialLogin('microsoft')">
+        <svg width="18" height="18" viewBox="0 0 24 24">
+          <rect x="1" y="1" width="10.5" height="10.5" fill="#F25022"/>
+          <rect x="12.5" y="1" width="10.5" height="10.5" fill="#7FBA00"/>
+          <rect x="1" y="12.5" width="10.5" height="10.5" fill="#00A4EF"/>
+          <rect x="12.5" y="12.5" width="10.5" height="10.5" fill="#FFB900"/>
+        </svg>
+        <span>Continuar con Microsoft / Outlook</span>
+      </button>
+
+      <!-- Apple -->
+      <button class="social-btn" onclick="socialLogin('apple')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="white">
+          <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
+        </svg>
+        <span>Continuar con Apple</span>
+      </button>
+
+    </div>
+
+    <!-- DIVIDER -->
+    <div class="divider">
+      <div class="divider-line"></div>
+      <div class="divider-text">o con tu correo</div>
+      <div class="divider-line"></div>
+    </div>
+
+    <!-- LOGIN FORM -->
+    <form class="auth-form" id="loginForm" onsubmit="handleLogin(event)">
+      <div>
+        <label class="field-label">Correo electrónico</label>
+        <input class="auth-input" type="email" id="loginEmail" placeholder="tu@email.com" required>
+      </div>
+      <div>
+        <label class="field-label">Contraseña</label>
+        <input class="auth-input" type="password" id="loginPass" placeholder="••••••••" required>
+      </div>
+      <div class="auth-error" id="loginError"></div>
+      <button type="submit" class="btn-primary">Iniciar sesión →</button>
+    </form>
+
+    <!-- REGISTER FORM -->
+    <form class="auth-form hidden" id="registerForm" onsubmit="handleRegister(event)">
+      <div>
+        <label class="field-label">Nombre</label>
+        <input class="auth-input" type="text" id="regName" placeholder="Tu nombre" required>
+      </div>
+      <div>
+        <label class="field-label">Correo electrónico</label>
+        <input class="auth-input" type="email" id="regEmail" placeholder="tu@email.com" required>
+      </div>
+      <div>
+        <label class="field-label">Contraseña</label>
+        <input class="auth-input" type="password" id="regPass" placeholder="Mínimo 6 caracteres" required minlength="6">
+      </div>
+      <div class="auth-error" id="registerError"></div>
+      <button type="submit" class="btn-primary">Crear cuenta →</button>
+    </form>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     APP SCREEN
+══════════════════════════════════════ -->
+<div id="appScreen" class="screen">
+  <div class="app-body">
+
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+      <div class="sidebar-logo">
+        <img class="sidebar-logo-img" id="sidebarLogoImg" src="" alt="Sonata">
+        <span class="sidebar-logo-name">Sonata</span>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Menú</div>
+        <div class="nav-item active" onclick="showView('home',this)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+          Inicio
+        </div>
+        <div class="nav-item" onclick="showView('songs',this)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+          Canciones
+        </div>
+        <div class="nav-item" onclick="showView('albums',this)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+          Álbumes
+        </div>
+        <div class="nav-item" onclick="showView('artists',this)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+          Artistas
+        </div>
+        <div class="nav-item" onclick="showView('playlists',this)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+          Playlists
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Mis Nubes</div>
+        <div class="cloud-item" onclick="showView('clouds',null)">
+          <div class="cloud-dot" id="gdot-gdrive"></div><span>Google Drive</span>
+        </div>
+        <div class="cloud-item" onclick="showView('clouds',null)">
+          <div class="cloud-dot" id="gdot-onedrive"></div><span>OneDrive</span>
+        </div>
+        <div class="cloud-item" onclick="showView('clouds',null)">
+          <div class="cloud-dot" id="gdot-dropbox"></div><span>Dropbox</span>
+        </div>
+        <div class="cloud-item" onclick="showView('clouds',null)">
+          <div class="cloud-dot" id="gdot-box"></div><span>Box</span>
+        </div>
+        <div class="cloud-item" onclick="showView('clouds',null)">
+          <div class="cloud-dot" id="gdot-s3"></div><span>Amazon S3</span>
+        </div>
+      </div>
+
+      <div class="sidebar-clouds">
+        <div class="sidebar-section-title">Configuración</div>
+        <div class="nav-item" onclick="showView('clouds',this)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z"/></svg>
+          Gestionar nubes
+        </div>
+      </div>
+
+      <div class="sidebar-user">
+        <div class="user-avatar" id="userAvatar">?</div>
+        <div class="user-info">
+          <div class="user-name" id="userName">—</div>
+          <div class="user-plan">Plan Gratis</div>
+        </div>
+        <button class="logout-btn" onclick="logout()" title="Cerrar sesión">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </button>
+      </div>
+    </aside>
+
+    <!-- MAIN -->
+    <main class="main">
+
+      <!-- HOME -->
+      <div class="view active" id="view-home">
+        <div class="view-header">
+          <div>
+            <div class="view-title" id="homeGreeting">Bienvenido 👋</div>
+            <div class="view-subtitle">¿Qué quieres escuchar hoy?</div>
+          </div>
+          <div class="search-bar">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" placeholder="Buscar canciones, artistas..." oninput="handleSearch(this.value)">
+          </div>
+        </div>
+        <div class="stats-row">
+          <div class="stat-card"><div class="stat-label">Canciones</div><div class="stat-value" id="statSongs">0</div><div class="stat-sub">en tu biblioteca</div></div>
+          <div class="stat-card"><div class="stat-label">Álbumes</div><div class="stat-value" id="statAlbums">0</div><div class="stat-sub">colecciones</div></div>
+          <div class="stat-card"><div class="stat-label">Artistas</div><div class="stat-value" id="statArtists">0</div><div class="stat-sub">diferentes</div></div>
+          <div class="stat-card"><div class="stat-label">Nubes</div><div class="stat-value" id="statClouds">0</div><div class="stat-sub">conectadas</div></div>
+        </div>
+        <div class="section-title">
+          Escuchado recientemente
+          <span class="see-all" onclick="showView('songs',document.querySelectorAll('.nav-item')[1])">Ver todo</span>
+        </div>
+        <div class="albums-grid" id="recentGrid"></div>
+        <div class="section-title">Canciones recientes</div>
+        <div class="songs-list">
+          <div class="songs-list-header"><span>#</span><span>Título</span><span>Artista</span><span>Álbum</span><span>Duración</span></div>
+          <div id="homeSongsList"></div>
+        </div>
+      </div>
+
+      <!-- SONGS -->
+      <div class="view" id="view-songs">
+        <div class="view-header">
+          <div>
+            <div class="view-title">Canciones</div>
+            <div class="view-subtitle" id="songCount">0 canciones en tu biblioteca</div>
+          </div>
+          <div class="search-bar">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" placeholder="Buscar canciones..." oninput="filterSongs(this.value)">
+          </div>
+        </div>
+        <div class="songs-list">
+          <div class="songs-list-header"><span>#</span><span>Título</span><span>Artista</span><span>Álbum</span><span>Duración</span></div>
+          <div id="allSongsList"></div>
+        </div>
+      </div>
+
+      <!-- ALBUMS -->
+      <div class="view" id="view-albums">
+        <div class="view-header">
+          <div><div class="view-title">Álbumes</div><div class="view-subtitle" id="albumCount">0 álbumes</div></div>
+        </div>
+        <div class="albums-grid" id="albumsGrid"></div>
+      </div>
+
+      <!-- ARTISTS -->
+      <div class="view" id="view-artists">
+        <div class="view-header">
+          <div><div class="view-title">Artistas</div><div class="view-subtitle" id="artistCount">0 artistas</div></div>
+        </div>
+        <div class="albums-grid" id="artistsGrid"></div>
+      </div>
+
+      <!-- PLAYLISTS -->
+      <div class="view" id="view-playlists">
+        <div class="view-header">
+          <div><div class="view-title">Playlists</div><div class="view-subtitle">Tus colecciones personales</div></div>
+          <button class="btn-primary" style="width:auto;padding:9px 18px;font-size:0.78rem" onclick="createPlaylist()">+ Nueva playlist</button>
+        </div>
+        <div class="playlists-grid" id="playlistsGrid"></div>
+      </div>
+
+      <!-- CLOUDS -->
+      <div class="view" id="view-clouds">
+        <div class="view-header">
+          <div><div class="view-title">Servicios en la nube</div><div class="view-subtitle">Conecta tus nubes para acceder a tu música</div></div>
+        </div>
+        <div class="clouds-grid" id="cloudsGrid"></div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- PLAYER BAR -->
+  <div class="player-bar">
+    <div class="now-playing">
+      <div class="np-art" id="npArt">🎵</div>
+      <div class="np-info">
+        <div class="np-title" id="npTitle">Sin reproducción</div>
+        <div class="np-artist" id="npArtist">—</div>
+      </div>
+      <button class="np-heart" id="npHeart" onclick="toggleLike()">♡</button>
+    </div>
+
+    <div class="player-controls">
+      <div class="ctrl-btns">
+        <button class="ctrl-btn" id="shuffleBtn" onclick="toggleShuffle()" title="Aleatorio">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
+        </button>
+        <button class="ctrl-btn" onclick="prevSong()">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5" stroke="currentColor" stroke-width="2"/></svg>
+        </button>
+        <button class="ctrl-play" id="playBtn" onclick="togglePlay()">
+          <svg id="playIcon" width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        </button>
+        <button class="ctrl-btn" onclick="nextSong()">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19" stroke="currentColor" stroke-width="2"/></svg>
+        </button>
+        <button class="ctrl-btn" id="repeatBtn" onclick="toggleRepeat()" title="Repetir">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>
+        </button>
+      </div>
+      <div class="progress-row">
+        <span class="prog-time" id="currentTime">0:00</span>
+        <div class="prog-bar" onclick="seekTo(event)">
+          <div class="prog-fill" id="progFill" style="width:0%"></div>
+        </div>
+        <span class="prog-time" id="totalTime">0:00</span>
+      </div>
+    </div>
+
+    <div class="vol-area">
+      <button class="ctrl-btn" onclick="toggleMute()">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14"/><path d="M15.54 8.46a5 5 0 010 7.07"/></svg>
+      </button>
+      <div class="vol-bar" onclick="setVolume(event)">
+        <div class="vol-fill" id="volFill" style="width:80%"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL -->
+<div class="oauth-modal" id="oauthModal">
+  <div class="oauth-box">
+    <div class="oauth-icon" id="oauthIcon">☁</div>
+    <div class="oauth-title" id="oauthTitle">Conectar servicio</div>
+    <div class="oauth-desc" id="oauthDesc">Sonata necesita acceso para leer tus archivos de música.</div>
+    <div class="oauth-perms">
+      <div class="oauth-perm-item">Ver archivos de música (MP3, FLAC, WAV, etc.)</div>
+      <div class="oauth-perm-item">Leer metadatos de archivos</div>
+      <div class="oauth-perm-item">Sin acceso a otros archivos personales</div>
+    </div>
+    <div class="oauth-actions">
+      <button class="oauth-cancel" onclick="closeModal()">Cancelar</button>
+      <button class="oauth-confirm" id="oauthConfirm" onclick="confirmConnect()">Conectar con OAuth →</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+// ══ SUPABASE CONFIG ══
+const SUPABASE_URL = 'https://kujxljnsmhjmcmhpctai.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_sN37WD5Cin22F_qoC4hfGg_s7W3k1EY';
+const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ══ LOGO BASE64 ══
+const LOGO_B64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAwwAAAL6CAYAAACbw9HLAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAAGYktHRAD/AP8A/6C9p5MAAAAHdElNRQfqBAQXCh4YOMPPAAAAAW9yTlQBz6J3mgAAgABJREFUeNrsvdmyLcmSHIYCiMjaZPMms/MqiWLzYvoAtloiJf3/H0mrMiJwHgB3IHJuTbNte601q8bIjAsuDodD//U//rOfc0RVxd1FRER1iPuWMYacI+IuMsaQLUfGGCIisvcWMxP3LeeIqKrgj+a/q8b/+z5iZvF35mI65Zwjrkd+95Ih8d02+BEyxhB3F3cXdROVIa4iR0XMD/8uPtfEzOSsLWIqqip7bzl6RETEVzyr5TOqjHx2z3fO/z5MVFXevUVEZPmK9xCTc/Kz3EVOfu+If/fl8Z4qYkO5lr5Proof";
+
+// ══ DATA ══
+const DB = {
+  get: k => { try { return JSON.parse(localStorage.getItem('sn_'+k)); } catch { return null; } },
+  set: (k,v) => localStorage.setItem('sn_'+k, JSON.stringify(v)),
+  del: k => localStorage.removeItem('sn_'+k)
+};
+
+const DEMO_SONGS = [
+  { id:1,  title:"Bohemian Rhapsody",   artist:"Queen",           album:"A Night at the Opera",    duration:"5:54", emoji:"🎸", cloud:"gdrive",   liked:false },
+  { id:2,  title:"Blinding Lights",     artist:"The Weeknd",      album:"After Hours",             duration:"3:20", emoji:"🌃", cloud:"gdrive",   liked:false },
+  { id:3,  title:"Levitating",          artist:"Dua Lipa",        album:"Future Nostalgia",        duration:"3:23", emoji:"✨", cloud:"onedrive", liked:false },
+  { id:4,  title:"Shape of You",        artist:"Ed Sheeran",      album:"÷ (Divide)",              duration:"3:54", emoji:"🎵", cloud:"dropbox",  liked:false },
+  { id:5,  title:"Bad Guy",             artist:"Billie Eilish",   album:"When We All Fall Asleep", duration:"3:14", emoji:"🖤", cloud:"gdrive",   liked:false },
+  { id:6,  title:"Uptown Funk",         artist:"Mark Ronson",     album:"Uptown Special",          duration:"4:30", emoji:"🕺", cloud:"onedrive", liked:false },
+  { id:7,  title:"Señorita",            artist:"Shawn Mendes",    album:"Shawn Mendes",            duration:"3:13", emoji:"💃", cloud:"dropbox",  liked:false },
+  { id:8,  title:"Watermelon Sugar",    artist:"Harry Styles",    album:"Fine Line",               duration:"2:54", emoji:"🍉", cloud:"gdrive",   liked:false },
+  { id:9,  title:"Stay",               artist:"The Kid LAROI",   album:"F*CK LOVE 3",             duration:"2:21", emoji:"🌊", cloud:"onedrive", liked:false },
+  { id:10, title:"As It Was",          artist:"Harry Styles",    album:"Harry's House",           duration:"2:37", emoji:"🌟", cloud:"gdrive",   liked:false },
+  { id:11, title:"Anti-Hero",          artist:"Taylor Swift",    album:"Midnights",               duration:"3:20", emoji:"🌙", cloud:"dropbox",  liked:false },
+  { id:12, title:"Flowers",            artist:"Miley Cyrus",     album:"Endless Summer Vacation", duration:"3:20", emoji:"🌸", cloud:"gdrive",   liked:false },
+  { id:13, title:"Cruel Summer",       artist:"Taylor Swift",    album:"Lover",                   duration:"2:58", emoji:"☀️", cloud:"onedrive", liked:false },
+  { id:14, title:"Peaches",            artist:"Justin Bieber",   album:"Justice",                 duration:"3:18", emoji:"🍑", cloud:"dropbox",  liked:false },
+  { id:15, title:"Industry Baby",      artist:"Lil Nas X",       album:"Montero",                 duration:"3:32", emoji:"🏭", cloud:"gdrive",   liked:false },
+];
+
+const CLOUD_SERVICES = [
+  { id:'gdrive',   name:'Google Drive',   icon:'🔵', color:'#4285F4', desc:'Almacenamiento de Google' },
+  { id:'onedrive', name:'OneDrive',       icon:'🌐', color:'#0078D4', desc:'Almacenamiento de Microsoft' },
+  { id:'dropbox',  name:'Dropbox',        icon:'📦', color:'#0061FF', desc:'Almacenamiento de Dropbox' },
+  { id:'box',      name:'Box',            icon:'📁', color:'#0061D5', desc:'Box Cloud Storage' },
+  { id:'s3',       name:'Amazon S3',      icon:'🟠', color:'#FF9900', desc:'Amazon Web Services S3' },
+  { id:'pcloud',   name:'pCloud',         icon:'☁️', color:'#17ACEA', desc:'pCloud Encrypted Storage' },
+];
+
+const ALBUM_COLORS = ['#1a1a35','#1a2535','#2a1a35','#1a3525','#35251a','#1a2030'];
+
+// ══ STATE ══
+let currentUser = null;
+let songs = [];
+let connectedClouds = {};
+let currentSongIdx = -1;
+let isPlaying = false;
+let isShuffle = false;
+let isRepeat = false;
+let isMuted = false;
+let volume = 0.8;
+let progress = 0;
+let progInterval = null;
+let songDuration = 200;
+let pendingCloud = null;
+let playlists = [];
+
+// ══ AUTH ══
+function switchTab(tab) {
+  document.querySelectorAll('.auth-tab').forEach((t,i)=> t.classList.toggle('active',(i===0&&tab==='login')||(i===1&&tab==='register')));
+  document.getElementById('loginForm').classList.toggle('hidden', tab!=='login');
+  document.getElementById('registerForm').classList.toggle('hidden', tab!=='register');
+}
+
+// LOGIN CON GOOGLE REAL via Supabase OAuth
+async function socialLogin(provider) {
+  const providerMap = { google: 'google', microsoft: 'azure', apple: 'apple' };
+  const sbProvider  = providerMap[provider];
+  showToast(`Conectando con ${provider.charAt(0).toUpperCase()+provider.slice(1)}...`);
+  const { error } = await _supabase.auth.signInWithOAuth({
+    provider: sbProvider,
+    options: { redirectTo: window.location.href }
+  });
+  if (error) showToast('Error: ' + error.message);
+}
+
+// LOGIN CON EMAIL/CONTRASEÑA REAL
+async function handleLogin(e) {
+  e.preventDefault();
+  const email = document.getElementById('loginEmail').value;
+  const pass  = document.getElementById('loginPass').value;
+  const errEl = document.getElementById('loginError');
+  errEl.textContent = '';
+  const { data, error } = await _supabase.auth.signInWithPassword({ email, password: pass });
+  if (error) { errEl.textContent = 'Correo o contraseña incorrectos'; return; }
+  loginSuccess(data.user);
+}
+
+// REGISTRO CON EMAIL/CONTRASEÑA REAL
+async function handleRegister(e) {
+  e.preventDefault();
+  const name  = document.getElementById('regName').value.trim();
+  const email = document.getElementById('regEmail').value;
+  const pass  = document.getElementById('regPass').value;
+  const errEl = document.getElementById('registerError');
+  errEl.textContent = '';
+  const { data, error } = await _supabase.auth.signUp({
+    email, password: pass,
+    options: { data: { name } }
+  });
+  if (error) { errEl.textContent = error.message; return; }
+  if (data.user && !data.session) {
+    errEl.style.color = 'var(--green)';
+    errEl.textContent = '✓ Revisa tu correo para confirmar tu cuenta';
+    return;
+  }
+  loginSuccess(data.user);
+}
+
+function loginSuccess(user) {
+  currentUser = {
+    id:     user.id,
+    name:   user.user_metadata?.name || user.user_metadata?.full_name || user.email.split('@')[0],
+    email:  user.email,
+    avatar: user.user_metadata?.avatar_url || null
+  };
+  document.getElementById('authScreen').classList.remove('active');
+  document.getElementById('appScreen').classList.add('active');
+  initApp();
+}
+
+async function logout() {
+  await _supabase.auth.signOut();
+  currentUser = null;
+  stopProgressTimer();
+  document.getElementById('appScreen').classList.remove('active');
+  document.getElementById('authScreen').classList.add('active');
+}
+
+// VERIFICAR SESIÓN ACTIVA al cargar la página
+async function checkSession() {
+  // Mostrar pantalla de carga
+  document.getElementById('authScreen').classList.add('active');
+
+  // Escuchar cambios de sesión (incluye redirect OAuth)
+  _supabase.auth.onAuthStateChange((event, session) => {
+    if (session?.user) {
+      loginSuccess(session.user);
+    }
+  });
+
+  const { data: { session } } = await _supabase.auth.getSession();
+  if (session?.user) loginSuccess(session.user);
+}
+
+// ══ APP INIT ══
+async function initApp() {
+  document.getElementById('userName').textContent = currentUser.name;
+
+  // Avatar
+  const av = document.getElementById('userAvatar');
+  if (currentUser.avatar) {
+    av.innerHTML = `<img src="${currentUser.avatar}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`;
+  } else {
+    av.innerHTML = currentUser.name.charAt(0).toUpperCase();
+  }
+
+  document.getElementById('homeGreeting').textContent = `Hola, ${currentUser.name.split(' ')[0]} 👋`;
+
+  // Sidebar logo
+  const sli = document.getElementById('sidebarLogoImg');
+  sli.src = LOGO_B64;
+  sli.onerror = () => sli.style.display='none';
+
+  // Cargar datos reales desde Supabase
+  await loadClouds();
+  await loadPlaylists();
+
+  buildLibrary();
+  updateStats();
+  renderAll();
+}
+
+async function loadClouds() {
+  connectedClouds = {};
+  const { data } = await _supabase
+    .from('cloud_connections')
+    .select('provider')
+    .eq('user_id', currentUser.id);
+  if (data) data.forEach(r => connectedClouds[r.provider] = true);
+}
+
+async function loadPlaylists() {
+  const { data } = await _supabase
+    .from('playlists')
+    .select('*')
+    .eq('user_id', currentUser.id)
+    .order('created_at', { ascending: true });
+  playlists = data || [];
+}
+
+function buildLibrary() {
+  const ids = Object.keys(connectedClouds).filter(k=>connectedClouds[k]);
+  songs = ids.length === 0 ? [] : DEMO_SONGS.filter(s=>ids.includes(s.cloud));
+}
+
+function updateStats() {
+  const cc = Object.keys(connectedClouds).filter(k=>connectedClouds[k]).length;
+  const albums  = [...new Set(songs.map(s=>s.album))];
+  const artists = [...new Set(songs.map(s=>s.artist))];
+  document.getElementById('statSongs').textContent   = songs.length;
+  document.getElementById('statAlbums').textContent  = albums.length;
+  document.getElementById('statArtists').textContent = artists.length;
+  document.getElementById('statClouds').textContent  = cc;
+  document.getElementById('songCount').textContent   = `${songs.length} canciones en tu biblioteca`;
+  document.getElementById('albumCount').textContent  = `${albums.length} álbumes`;
+  document.getElementById('artistCount').textContent = `${artists.length} artistas`;
+  CLOUD_SERVICES.forEach(c=>{
+    const d = document.getElementById('gdot-'+c.id);
+    if (d) d.className = 'cloud-dot '+(connectedClouds[c.id]?'connected':'disconnected');
+  });
+}
+
+// ══ RENDER ══
+function renderAll() {
+  renderHomeSongs(); renderRecentGrid(); renderAllSongs();
+  renderAlbums(); renderArtists(); renderClouds(); renderPlaylists();
+}
+
+function songRowHTML(song, idx) {
+  const cl = {gdrive:'Drive',onedrive:'OneDrive',dropbox:'Dropbox',box:'Box',s3:'S3',pcloud:'pCloud'};
+  const playing = currentSongIdx !== -1 && songs[currentSongIdx]?.id === song.id;
+  return `
+    <div class="song-row ${playing?'playing':''}" onclick="playSongById(${song.id})">
+      <div class="song-num">${playing?`<div class="eq-bars"><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div></div>`:idx}</div>
+      <div class="song-info-cell">
+        <div class="song-mini-art" style="background:${ALBUM_COLORS[song.id%6]}">${song.emoji}</div>
+        <span class="song-title">${song.title}<span class="song-cloud-badge">${cl[song.cloud]||song.cloud}</span></span>
+      </div>
+      <div class="song-artist-cell">${song.artist}</div>
+      <div class="song-album-cell">${song.album}</div>
+      <div class="song-dur">${song.duration}</div>
+    </div>`;
+}
+
+function empty(msg) { return `<div style="padding:28px;text-align:center;color:var(--text3)">${msg}</div>`; }
+
+function renderHomeSongs() {
+  const el = document.getElementById('homeSongsList');
+  el.innerHTML = songs.length===0 ? empty('Conecta una nube para ver tus canciones aquí 🎵') : songs.slice(0,8).map((s,i)=>songRowHTML(s,i+1)).join('');
+}
+function renderRecentGrid() {
+  const el = document.getElementById('recentGrid');
+  if (songs.length===0) { el.innerHTML=`<div style="color:var(--text3);font-size:0.83rem;padding:8px 0">Conecta una nube para ver álbumes aquí.</div>`; return; }
+  const albums = [...new Map(songs.map(s=>[s.album,s])).values()].slice(0,6);
+  el.innerHTML = albums.map(s=>`
+    <div class="album-card" onclick="playSongById(${s.id})">
+      <div class="album-art" style="background:${ALBUM_COLORS[s.id%6]}">${s.emoji}</div>
+      <div class="album-info"><div class="album-name">${s.album}</div><div class="album-artist">${s.artist}</div></div>
+    </div>`).join('');
+}
+function renderAllSongs(filter='') {
+  const el = document.getElementById('allSongsList');
+  const f = songs.filter(s=>s.title.toLowerCase().includes(filter.toLowerCase())||s.artist.toLowerCase().includes(filter.toLowerCase())||s.album.toLowerCase().includes(filter.toLowerCase()));
+  el.innerHTML = f.length===0 ? empty(songs.length===0?'Conecta una nube para ver tu música 🎵':'Sin resultados') : f.map((s,i)=>songRowHTML(s,i+1)).join('');
+}
+function renderAlbums() {
+  const el = document.getElementById('albumsGrid');
+  const m = {}; songs.forEach(s=>{ if(!m[s.album]) m[s.album]={...s,count:0}; m[s.album].count++; });
+  const a = Object.values(m);
+  el.innerHTML = a.length===0 ? empty('Sin álbumes. Conecta una nube.') : a.map(s=>`
+    <div class="album-card" onclick="playSongById(${s.id})">
+      <div class="album-art" style="background:${ALBUM_COLORS[s.id%6]}">${s.emoji}</div>
+      <div class="album-info"><div class="album-name">${s.album}</div><div class="album-artist">${s.artist}</div><div class="album-count">${s.count} canción${s.count!==1?'es':''}</div></div>
+    </div>`).join('');
+}
+function renderArtists() {
+  const el = document.getElementById('artistsGrid');
+  const m = {}; songs.forEach(s=>{ if(!m[s.artist]) m[s.artist]={...s,count:0}; m[s.artist].count++; });
+  const a = Object.values(m);
+  el.innerHTML = a.length===0 ? empty('Sin artistas. Conecta una nube.') : a.map(s=>`
+    <div class="album-card" onclick="playSongById(${s.id})">
+      <div class="album-art" style="background:${ALBUM_COLORS[s.id%6]};border-radius:50% 50% 0 0">${s.emoji}</div>
+      <div class="album-info"><div class="album-name">${s.artist}</div><div class="album-count">${s.count} canción${s.count!==1?'es':''}</div></div>
+    </div>`).join('');
+}
+function renderClouds() {
+  const el = document.getElementById('cloudsGrid');
+  el.innerHTML = CLOUD_SERVICES.map(c=>{
+    const conn = !!connectedClouds[c.id];
+    const cnt  = DEMO_SONGS.filter(s=>s.cloud===c.id).length;
+    return `
+    <div class="cloud-card">
+      <div class="cloud-card-header">
+        <div class="cloud-icon" style="background:${c.color}22">${c.icon}</div>
+        <div>
+          <div class="cloud-card-name">${c.name}</div>
+          <div class="cloud-card-status ${conn?'status-connected':'status-disconnected'}">${conn?'● Conectado':'○ No conectado'}</div>
+        </div>
+      </div>
+      <div class="cloud-stats">
+        <div class="cloud-stat-item"><strong>${conn?cnt:'—'}</strong>canciones</div>
+        <div class="cloud-stat-item"><strong>${c.desc}</strong></div>
+      </div>
+      ${conn
+        ? `<button class="btn-sync" onclick="syncCloud('${c.id}')">↻ Sincronizar</button>
+           <button class="btn-disconnect" onclick="disconnectCloud('${c.id}')">Desconectar</button>`
+        : `<button class="btn-connect" onclick="startConnect('${c.id}')">Conectar con ${c.name}</button>`}
+    </div>`;
+  }).join('');
+}
+function renderPlaylists() {
+  const el = document.getElementById('playlistsGrid');
+  const colors = ['#1a1a35','#2a1a35','#1a3525','#35251a'];
+  let html = playlists.map(p=>`
+    <div class="playlist-card" onclick="playPlaylist(${p.id})">
+      <div class="playlist-art">${colors.map(c=>`<div class="playlist-art-q" style="background:${c}">${p.emojis?.[0]||'🎵'}</div>`).join('')}</div>
+      <div class="playlist-info"><div class="playlist-name">${p.name}</div><div class="playlist-count">${p.songs?.length||0} canciones</div></div>
+    </div>`).join('');
+  html += `<div class="new-playlist-btn" onclick="createPlaylist()">
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+    Nueva playlist</div>`;
+  el.innerHTML = html;
+}
+
+// ══ NAVIGATION ══
+function showView(name, navEl) {
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  document.getElementById('view-'+name)?.classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  if (navEl?.classList?.contains('nav-item')) navEl.classList.add('active');
+}
+
+// ══ SEARCH ══
+function handleSearch(v) { renderAllSongs(v); showView('songs',null); }
+function filterSongs(v)   { renderAllSongs(v); }
+
+// ══ PLAYER ══
+function playSongById(id) {
+  const idx = songs.findIndex(s=>s.id===id);
+  if (idx===-1) return;
+  currentSongIdx = idx;
+  const song = songs[idx];
+  document.getElementById('npTitle').textContent  = song.title;
+  document.getElementById('npArtist').textContent = song.artist;
+  document.getElementById('npArt').textContent    = song.emoji;
+  document.getElementById('npArt').style.background = ALBUM_COLORS[song.id%6];
+  document.getElementById('npHeart').textContent = song.liked?'♥':'♡';
+  document.getElementById('npHeart').classList.toggle('liked', song.liked);
+  isPlaying = true; updatePlayBtn();
+  progress = 0; songDuration = parseDuration(song.duration);
+  startProgressTimer();
+  renderHomeSongs(); renderAllSongs();
+  showToast(`▶ ${song.title} — ${song.artist}`);
+}
+
+function parseDuration(d) { const [m,s]=d.split(':').map(Number); return m*60+s; }
+
+function togglePlay() {
+  if (currentSongIdx===-1 && songs.length>0) { playSongById(songs[0].id); return; }
+  isPlaying=!isPlaying;
+  if(isPlaying) startProgressTimer(); else stopProgressTimer();
+  updatePlayBtn();
+}
+function updatePlayBtn() {
+  document.getElementById('playIcon').innerHTML = isPlaying
+    ? '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>'
+    : '<polygon points="5 3 19 12 5 21 5 3"/>';
+}
+function nextSong() {
+  if(!songs.length) return;
+  currentSongIdx = isShuffle ? Math.floor(Math.random()*songs.length) : (currentSongIdx+1)%songs.length;
+  playSongById(songs[currentSongIdx].id);
+}
+function prevSong() {
+  if(!songs.length) return;
+  if(progress>5){progress=0;return;}
+  currentSongIdx=(currentSongIdx-1+songs.length)%songs.length;
+  playSongById(songs[currentSongIdx].id);
+}
+function toggleShuffle() { isShuffle=!isShuffle; document.getElementById('shuffleBtn').classList.toggle('active',isShuffle); }
+function toggleRepeat()  { isRepeat=!isRepeat;   document.getElementById('repeatBtn').classList.toggle('active',isRepeat); }
+function toggleLike() {
+  if(currentSongIdx===-1) return;
+  songs[currentSongIdx].liked=!songs[currentSongIdx].liked;
+  document.getElementById('npHeart').textContent=songs[currentSongIdx].liked?'♥':'♡';
+  document.getElementById('npHeart').classList.toggle('liked',songs[currentSongIdx].liked);
+  showToast(songs[currentSongIdx].liked?'❤ Añadido a Me gusta':'♡ Eliminado de Me gusta');
+}
+
+function startProgressTimer() {
+  stopProgressTimer();
+  progInterval = setInterval(()=>{
+    if(!isPlaying) return;
+    progress++;
+    if(progress>=songDuration){ if(isRepeat){progress=0;return;} nextSong(); return; }
+    updateProgressUI();
+  },1000);
+}
+function stopProgressTimer() { if(progInterval){clearInterval(progInterval);progInterval=null;} }
+function updateProgressUI() {
+  const p = songDuration>0?(progress/songDuration)*100:0;
+  document.getElementById('progFill').style.width=p+'%';
+  document.getElementById('currentTime').textContent=formatTime(progress);
+  document.getElementById('totalTime').textContent=formatTime(songDuration);
+}
+function formatTime(s) { const m=Math.floor(s/60); return `${m}:${(s%60).toString().padStart(2,'0')}`; }
+function seekTo(e) { progress=Math.floor((e.offsetX/e.currentTarget.offsetWidth)*songDuration); updateProgressUI(); }
+function setVolume(e) { volume=Math.max(0,Math.min(1,e.offsetX/e.currentTarget.offsetWidth)); document.getElementById('volFill').style.width=(volume*100)+'%'; }
+function toggleMute() { isMuted=!isMuted; document.getElementById('volFill').style.width=isMuted?'0%':(volume*100)+'%'; }
+
+// ══ CLOUDS ══
+function startConnect(id) {
+  pendingCloud=id;
+  const c=CLOUD_SERVICES.find(x=>x.id===id);
+  document.getElementById('oauthIcon').textContent=c.icon;
+  document.getElementById('oauthTitle').textContent=`Conectar ${c.name}`;
+  document.getElementById('oauthDesc').textContent=`Sonata se conectará a tu ${c.name} para leer archivos de música. Nunca accederemos a otros archivos.`;
+  document.getElementById('oauthModal').classList.add('show');
+}
+function closeModal() { document.getElementById('oauthModal').classList.remove('show'); pendingCloud=null; }
+
+async function confirmConnect() {
+  if(!pendingCloud) return;
+  const c=CLOUD_SERVICES.find(x=>x.id===pendingCloud);
+  const btn=document.getElementById('oauthConfirm');
+  btn.textContent='Conectando...';
+
+  // Guardar conexión en Supabase
+  const { error } = await _supabase.from('cloud_connections').upsert({
+    user_id:      currentUser.id,
+    provider:     pendingCloud,
+    connected_at: new Date().toISOString()
+  }, { onConflict: 'user_id,provider' });
+
+  if (error) {
+    showToast('Error al conectar: ' + error.message);
+  } else {
+    connectedClouds[pendingCloud]=true;
+    buildLibrary(); updateStats(); renderAll();
+    showToast(`✓ ${c.name} conectado correctamente`);
+  }
+  closeModal();
+  btn.textContent='Conectar con OAuth →';
+}
+
+async function disconnectCloud(id) {
+  const c=CLOUD_SERVICES.find(x=>x.id===id);
+  if(!confirm(`¿Desconectar ${c.name}?`)) return;
+
+  await _supabase.from('cloud_connections')
+    .delete()
+    .eq('user_id', currentUser.id)
+    .eq('provider', id);
+
+  delete connectedClouds[id];
+  buildLibrary(); updateStats(); renderAll();
+  showToast(`${c.name} desconectado`);
+}
+
+function syncCloud(id) {
+  const c=CLOUD_SERVICES.find(x=>x.id===id);
+  showToast(`↻ Sincronizando ${c.name}...`);
+  setTimeout(()=>showToast(`✓ ${c.name} sincronizado`),2000);
+}
+
+// ══ PLAYLISTS ══
+async function createPlaylist() {
+  const name=prompt('Nombre de la nueva playlist:');
+  if(!name?.trim()) return;
+
+  const { data, error } = await _supabase.from('playlists').insert({
+    user_id: currentUser.id,
+    name:    name.trim()
+  }).select().single();
+
+  if (error) { showToast('Error al crear playlist'); return; }
+  playlists.push(data);
+  renderPlaylists();
+  showToast(`✓ Playlist "${name}" creada`);
+}
+
+function playPlaylist(id) {
+  const pl=playlists.find(p=>p.id===id);
+  if(!pl){ showToast('Playlist no encontrada'); return; }
+  showToast('Esta playlist está vacía por ahora');
+}
+
+// ══ UTILS ══
+function showToast(msg) {
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),2800);
+}
+
+// ══ BOOT ══
+document.querySelector('.auth-logo-img').src = LOGO_B64;
+checkSession();
+</script>
+</body>
+</html>
