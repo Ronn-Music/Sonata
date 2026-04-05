@@ -1311,29 +1311,35 @@ async function loadClouds() {
 }
 
 async function loadSongsFromDB() {
-  const { data } = await _supabase
+  const { data, error } = await _supabase
     .from('songs')
     .select('*')
     .eq('user_id', currentUser.id)
     .order('title', { ascending: true });
 
-  if (data && data.length > 0) {
-    songs = data.map(function(s) {
-      return {
-        id:       s.id,
-        title:    s.title    || 'Sin título',
-        artist:   s.artist   || 'Desconocido',
-        album:    s.album    || 'Sin álbum',
-        duration: s.duration ? formatTime(s.duration) : '0:00',
-        emoji:    s.emoji    || '🎵',
-        cloud:    s.cloud_provider || 'gdrive',
-        fileUrl:  s.file_url || null,
-        filePath: s.file_path || null,
-        accountKey: s.account_key || null,
-        liked:    false
-      };
-    });
+  if (error) {
+    console.error('Error cargando canciones:', error);
+    return;
   }
+
+  // Siempre actualizar el array (incluso si está vacío)
+  songs = (data || []).map(function(s) {
+    return {
+      id:         s.id,
+      title:      s.title    || 'Sin título',
+      artist:     s.artist   || 'Desconocido',
+      album:      s.album    || 'Sin álbum',
+      duration:   s.duration ? formatTime(s.duration) : '0:00',
+      emoji:      s.emoji    || '🎵',
+      cloud:      s.cloud_provider || 'gdrive',
+      fileUrl:    s.file_url  || null,
+      filePath:   s.file_path || null,
+      accountKey: s.account_key || null,
+      liked:      false
+    };
+  });
+
+  console.log('Canciones cargadas desde DB:', songs.length);
 }
 
 async function loadPlaylists() {
@@ -1840,8 +1846,11 @@ async function _saveGdriveToken(accessToken, expiresIn, emailHint) {
 
   await scanGoogleDrive(accessToken, accountKey);
   await loadClouds();
+  await loadSongsFromDB();
+  buildLibrary();
   updateStats();
   renderAll();
+  showView('songs', document.querySelectorAll('.nav-item')[1]);
 }
 
 // Escanear Google Drive y guardar canciones en Supabase
@@ -1858,39 +1867,80 @@ async function scanGoogleDrive(token, accountKey) {
 
     if (data.error) {
       showToast('⚠ Error de Google Drive: ' + (data.error.message || 'token inválido'));
+      console.error('Drive API error:', data.error);
       return;
     }
     if (!data.files || data.files.length === 0) {
       showToast('⚠ No se encontraron archivos de música en ' + label);
+      console.warn('Drive: 0 archivos de audio encontrados');
       return;
     }
 
-    let guardadas = 0;
+    console.log('Drive: encontrados ' + data.files.length + ' archivos de audio');
+
+    let guardadas = 0, errores = 0;
     for (const file of data.files) {
       const nombre  = file.name.replace(/\.(mp3|flac|wav|ogg|m4a|mp4)$/i, '');
       const partes  = nombre.split(' - ');
       const artista = partes.length > 1 ? partes[0].trim() : 'Desconocido';
       const titulo  = partes.length > 1 ? partes.slice(1).join(' - ').trim() : nombre;
+      const filePath = (accountKey || 'gdrive') + ':' + file.id;
 
-      const { error } = await _supabase.from('songs').upsert({
+      // Intentar con columnas extendidas primero
+      let result = await _supabase.from('songs').upsert({
         user_id:        currentUser.id,
         title:          titulo,
         artist:         artista,
         album:          'Google Drive',
-        file_path:      (accountKey || 'gdrive') + ':' + file.id,
+        file_path:      filePath,
         file_url:       'https://www.googleapis.com/drive/v3/files/' + file.id + '?alt=media',
         cloud_provider: 'gdrive',
         account_key:    accountKey || 'gdrive',
         duration:       0
       }, { onConflict: 'user_id,file_path' });
 
-      if (!error) guardadas++;
+      // Fallback sin account_key si la columna no existe en Supabase
+      if (result.error && result.error.message && result.error.message.includes('account_key')) {
+        result = await _supabase.from('songs').upsert({
+          user_id:        currentUser.id,
+          title:          titulo,
+          artist:         artista,
+          album:          'Google Drive',
+          file_path:      filePath,
+          file_url:       'https://www.googleapis.com/drive/v3/files/' + file.id + '?alt=media',
+          cloud_provider: 'gdrive',
+          duration:       0
+        }, { onConflict: 'user_id,file_path' });
+      }
+
+      // Fallback sin file_path único (columna puede llamarse diferente)
+      if (result.error && result.error.message && result.error.message.includes('file_path')) {
+        result = await _supabase.from('songs').insert({
+          user_id:        currentUser.id,
+          title:          titulo,
+          artist:         artista,
+          album:          'Google Drive',
+          file_path:      filePath,
+          file_url:       'https://www.googleapis.com/drive/v3/files/' + file.id + '?alt=media',
+          cloud_provider: 'gdrive',
+          duration:       0
+        });
+      }
+
+      if (result.error) {
+        console.error('Error guardando canción "' + titulo + '":', result.error);
+        errores++;
+      } else {
+        guardadas++;
+      }
     }
 
-    showToast('✓ ' + guardadas + ' canciones de ' + label);
+    console.log('Scan completo: ' + guardadas + ' guardadas, ' + errores + ' errores');
+    showToast('✓ ' + guardadas + ' canciones de ' + label + (errores > 0 ? ' (' + errores + ' errores)' : ''));
     await loadSongsFromDB();
 
   } catch(err) {
+    console.error('scanGoogleDrive error:', err);
     showToast('Error al escanear Drive: ' + err.message);
   }
 }
