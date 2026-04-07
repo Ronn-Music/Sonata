@@ -1365,7 +1365,7 @@ async function loadSongsFromDB(){
   let all=[], from=0; const PAGE=1000;
   while(true){
     const{data,error}=await _supabase.from('songs')
-      .select('id,title,artist,album,duration,file_path,file_url,cloud_provider,cover_url,liked')
+      .select('id,title,artist,album,duration,file_path,file_url,cloud_provider,account_key,cover_url,liked')
       .eq('user_id',currentUser.id)
       .order('title',{ascending:true})
       .range(from,from+PAGE-1);
@@ -1380,6 +1380,7 @@ async function loadSongsFromDB(){
     album: (s.album&&s.album!=='Google Drive') ? s.album : 'Sin álbum',
     duration:s.duration?fmt(s.duration):'0:00',
     cloud:s.cloud_provider||'gdrive',
+    accountKey:s.account_key||null,
     fileUrl:s.file_url||null, filePath:s.file_path||null,
     liked:s.liked||false, coverUrl:s.cover_url||null
   }));
@@ -1755,13 +1756,16 @@ async function playSongById(id){
     toast('▶ '+song.title+' — '+song.artist); return;
   }
 
-  // FIX 6: Get token properly
-  let token=connectedClouds['_tok_'+(song.cloud||'gdrive')];
+  // FIX 6: Get token properly — try accountKey first, then provider fallback
+  let token=connectedClouds['_tok_'+(song.accountKey||'')]
+    ||connectedClouds['_tok_'+(song.cloud||'gdrive')];
   if(!token){
     const{data:cd}=await _supabase.from('cloud_connections')
-      .select('access_token,token_expires_at').eq('user_id',currentUser.id).eq('provider',song.cloud||'gdrive').single();
-    if(cd?.access_token){
-      token=cd.access_token;
+      .select('access_token,token_expires_at').eq('user_id',currentUser.id)
+      .eq('provider',song.cloud||'gdrive').limit(1);
+    const row=Array.isArray(cd)?cd[0]:cd;
+    if(row?.access_token){
+      token=row.access_token;
       connectedClouds['_tok_'+(song.cloud||'gdrive')]=token;
     }
   }
@@ -1986,7 +1990,7 @@ async function saveGDriveToken(accessToken, expiresIn){
     access_token:accessToken,
     token_expires_at:exp,
     connected_at:new Date().toISOString()
-  },{onConflict:'user_id,account_key'});
+  },{onConflict:'user_id,provider'});
 
   if(error){toast('⚠ Error guardando conexión: '+error.message);console.error(error);return;}
 
