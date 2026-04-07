@@ -1584,7 +1584,9 @@ async function loadClouds(){
             access_token:acc.token,token_expires_at:acc.expires,connected_at:r.connected_at,expired:!!expired});
           if(!expired){anyActive=true;connectedClouds['_tok_'+acc.key]=acc.token;connectedClouds['_tok_'+r.provider]=acc.token;
             if(acc.expires) scheduleTokenRefresh(acc.key,acc.label||acc.key,acc.expires);
-          } else { scheduleTokenRefresh(acc.key,acc.label||acc.key,acc.expires); }
+          }
+          // NOTE: do NOT schedule silent refresh for already-expired tokens —
+          // Google blocks iframe OAuth (COOP policy). Banner shows when user tries to play.
         });
         if(anyActive)connectedClouds[r.provider]=true;
       } else {
@@ -1967,22 +1969,15 @@ audioEl.addEventListener('timeupdate',()=>{
   songDuration=Math.floor(audioEl.duration);
   updateProgressUI(); syncNpProgress();
 });
-// FIX 6: handle play errors — detect 401/token expiry and try silent refresh first
+// FIX 6: handle play errors — detect 401/token expiry and show reconnect banner
 audioEl.addEventListener('error',(e)=>{
   const err=audioEl.error;
   // MediaError code 4 = MEDIA_ERR_SRC_NOT_SUPPORTED — often a 401 from Drive
   if(err&&err.code===4&&currentSongIdx!==-1){
     const song=songs[currentSongIdx];
-    console.warn('Audio error code 4 (likely 401 token expired) for',song.accountKey);
+    console.warn('Audio error code 4 (likely token expired) for',song.accountKey);
     isPlaying=false; updatePlayBtn();
-    // Try silent refresh first; if it works, retry the song automatically
-    autoRefreshToken(song.accountKey||'gdrive', song.accountKey||'Google Drive')
-      .catch(()=>{}) // error already handled inside autoRefreshToken
-      .then(()=>{
-        // After refresh attempt, retry playing if we got a new token
-        const newTok=connectedClouds['_tok_'+(song.accountKey||'gdrive')];
-        if(newTok){ setTimeout(()=>playSongById(song.id), 500); }
-      });
+    showTokenExpiredBanner(song.accountKey||'gdrive', song.accountKey||'Google Drive');
   } else {
     console.error('Audio error:',e);
     toast('Error al reproducir. Intenta de nuevo.');
@@ -2053,12 +2048,9 @@ async function playSongById(id){
     });
     if (!res.ok) {
       if (res.status === 401 || res.status === 403) {
-        console.warn('Token inválido ('+res.status+'), intentando refresh...');
-        await autoRefreshToken(song.accountKey || 'gdrive', song.accountKey || 'Google Drive').catch(()=>{});
-        // Reintentar con token nuevo si se actualizó
-        const newTok = connectedClouds['_tok_'+(song.accountKey||'gdrive')];
-        if (newTok && newTok !== token) { setTimeout(()=>playSongById(song.id), 500); }
-        else { showTokenExpiredBanner(song.accountKey||'gdrive', song.accountKey||'Google Drive'); }
+        console.warn('Token inválido ('+res.status+') para', song.accountKey||'gdrive');
+        showTokenExpiredBanner(song.accountKey||'gdrive', song.accountKey||'Google Drive');
+        isPlaying=false; updatePlayBtn();
         return;
       }
       throw new Error('HTTP ' + res.status);
@@ -2190,52 +2182,16 @@ function toggleMute(){
 let _tokenRefreshTimers={};
 let _silentRefreshInProgress={};
 
-// Try to silently get a new token via hidden iframe (no user interaction needed)
-function silentRefreshGDrive(accountKey, label){
-  if(_silentRefreshInProgress[accountKey]) return _silentRefreshInProgress[accountKey];
-  const promise=new Promise((resolve,reject)=>{
-    const nonce=Math.random().toString(36).slice(2);
-    const scope='https://www.googleapis.com/auth/drive.readonly email profile';
-    const url='https://accounts.google.com/o/oauth2/v2/auth'
-      +'?client_id='+encodeURIComponent(GOOGLE_CLIENT_ID)
-      +'&redirect_uri='+encodeURIComponent(GOOGLE_REDIRECT)
-      +'&response_type=token'
-      +'&scope='+encodeURIComponent(scope)
-      +'&state='+encodeURIComponent(JSON.stringify({nonce,provider:'gdrive'}))
-      +'&prompt=none'; // KEY: silent — no UI shown to user
-    const iframe=document.createElement('iframe');
-    iframe.style.cssText='display:none;position:absolute;width:0;height:0;';
-    document.body.appendChild(iframe);
-    // Timeout after 12 seconds
-    const timer=setTimeout(()=>{ cleanup(); reject(new Error('timeout')); },12000);
-    function cleanup(){ clearTimeout(timer); window.removeEventListener('message',onMsg); if(iframe.parentNode) iframe.remove(); delete _silentRefreshInProgress[accountKey]; }
-    function onMsg(ev){
-      if(ev.origin!==window.location.origin) return;
-      const msg=ev.data; if(!msg||msg.type!=='gdrive_token'||msg.nonce!==nonce) return;
-      cleanup(); resolve(msg);
-    }
-    window.addEventListener('message',onMsg);
-    iframe.src=url;
-  });
-  _silentRefreshInProgress[accountKey]=promise;
-  return promise;
-}
-
-// Called automatically before token expires — tries silent refresh first, banner as fallback
+// Silent iframe refresh is NOT used — Google blocks it via COOP/COEP policy (prompt=none fails).
+// autoRefreshToken now only shows the banner and lets the user reconnect via popup.
 async function autoRefreshToken(accountKey, label){
-  console.log('🔄 Auto-refreshing token for',label||accountKey);
-  try {
-    const msg=await silentRefreshGDrive(accountKey,label);
-    // Update token in memory immediately (saveGDriveToken also reschedules next refresh)
-    connectedClouds['_tok_'+accountKey]=msg.token;
-    connectedClouds['_tok_gdrive']=msg.token;
-    await saveGDriveToken(msg.token,msg.expiresIn);
-    console.log('✅ Token auto-refreshed silently for',label||accountKey);
-  } catch(e){
-    console.warn('Silent refresh failed for',label||accountKey,':',e.message);
-    // Only show banner if truly needed (user closed Google session, etc.)
-    showTokenExpiredBanner(accountKey,label);
-  }
+  // Check if already showing banner — avoid duplicate calls
+  if(_silentRefreshInProgress[accountKey]) return;
+  _silentRefreshInProgress[accountKey]=true;
+  console.warn('🔑 Token expired for', label||accountKey, '— showing reconnect banner');
+  showTokenExpiredBanner(accountKey, label);
+  // Clear flag after a delay so it can be retried later if needed
+  setTimeout(()=>{ delete _silentRefreshInProgress[accountKey]; }, 30000);
 }
 
 function showTokenExpiredBanner(accountKey, label){
@@ -2254,17 +2210,18 @@ function showTokenExpiredBanner(accountKey, label){
 function scheduleTokenRefresh(accountKey, label, expiresAt){
   if(_tokenRefreshTimers[accountKey]) clearTimeout(_tokenRefreshTimers[accountKey]);
   const msUntilExpiry=new Date(expiresAt).getTime()-Date.now();
-  // Refresh 3 minutes before expiry (or immediately if already expired/close)
-  const msUntilRefresh=Math.max(msUntilExpiry-3*60*1000, 0);
+  // Warn 3 minutes before expiry with a non-blocking console notice only
+  const msUntilWarn=Math.max(msUntilExpiry-3*60*1000, 0);
   if(msUntilExpiry<=0){
-    // Already expired — try silent refresh right away
-    autoRefreshToken(accountKey,label); return;
+    // Already expired — do nothing here, banner shows when user tries to play
+    return;
   }
-  console.log('⏱ Token for',label||accountKey,'refreshes in',Math.round(msUntilRefresh/60000),'min');
+  console.log('⏱ Token for',label||accountKey,'expires in',Math.round(msUntilExpiry/60000),'min');
   _tokenRefreshTimers[accountKey]=setTimeout(()=>{
     delete _tokenRefreshTimers[accountKey];
-    autoRefreshToken(accountKey,label);
-  }, Math.min(msUntilRefresh,2147483647));
+    // Token is about to expire — show banner so user can reconnect proactively
+    showTokenExpiredBanner(accountKey, label);
+  }, Math.min(msUntilWarn, 2147483647));
 }
 
 // ══ CLOUDS ══
