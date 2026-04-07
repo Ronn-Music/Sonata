@@ -1582,7 +1582,9 @@ async function loadClouds(){
           const expired=acc.expires&&new Date(acc.expires)<new Date();
           accountsList.push({id:r.id,provider:r.provider,account_key:acc.key,account_label:acc.label,
             access_token:acc.token,token_expires_at:acc.expires,connected_at:r.connected_at,expired:!!expired});
-          if(!expired){anyActive=true;connectedClouds['_tok_'+acc.key]=acc.token;connectedClouds['_tok_'+r.provider]=acc.token;}
+          if(!expired){anyActive=true;connectedClouds['_tok_'+acc.key]=acc.token;connectedClouds['_tok_'+r.provider]=acc.token;
+            if(acc.expires) scheduleTokenRefresh(acc.key,acc.label||acc.key,acc.expires);
+          } else { scheduleTokenRefresh(acc.key,acc.label||acc.key,acc.expires); }
         });
         if(anyActive)connectedClouds[r.provider]=true;
       } else {
@@ -1965,11 +1967,27 @@ audioEl.addEventListener('timeupdate',()=>{
   songDuration=Math.floor(audioEl.duration);
   updateProgressUI(); syncNpProgress();
 });
-// FIX 6: handle play errors gracefully
+// FIX 6: handle play errors — detect 401/token expiry and try silent refresh first
 audioEl.addEventListener('error',(e)=>{
-  console.error('Audio error:',e);
-  toast('Error al reproducir. Intenta de nuevo.');
-  isPlaying=false; updatePlayBtn();
+  const err=audioEl.error;
+  // MediaError code 4 = MEDIA_ERR_SRC_NOT_SUPPORTED — often a 401 from Drive
+  if(err&&err.code===4&&currentSongIdx!==-1){
+    const song=songs[currentSongIdx];
+    console.warn('Audio error code 4 (likely 401 token expired) for',song.accountKey);
+    isPlaying=false; updatePlayBtn();
+    // Try silent refresh first; if it works, retry the song automatically
+    autoRefreshToken(song.accountKey||'gdrive', song.accountKey||'Google Drive')
+      .catch(()=>{}) // error already handled inside autoRefreshToken
+      .then(()=>{
+        // After refresh attempt, retry playing if we got a new token
+        const newTok=connectedClouds['_tok_'+(song.accountKey||'gdrive')];
+        if(newTok){ setTimeout(()=>playSongById(song.id), 500); }
+      });
+  } else {
+    console.error('Audio error:',e);
+    toast('Error al reproducir. Intenta de nuevo.');
+    isPlaying=false; updatePlayBtn();
+  }
 });
 
 async function playSongById(id){
@@ -1994,7 +2012,7 @@ async function playSongById(id){
     toast('▶ '+song.title+' — '+song.artist); return;
   }
 
-  // FIX 6: Get token properly — try accountKey first, then provider fallback
+  // FIX 6: Get token — try accountKey first, then provider fallback, then parse multi-account JSON
   let token=connectedClouds['_tok_'+(song.accountKey||'')]
     ||connectedClouds['_tok_'+(song.cloud||'gdrive')];
   if(!token){
@@ -2003,40 +2021,51 @@ async function playSongById(id){
       .eq('provider',song.cloud||'gdrive').limit(1);
     const row=Array.isArray(cd)?cd[0]:cd;
     if(row?.access_token){
-      token=row.access_token;
-      connectedClouds['_tok_'+(song.cloud||'gdrive')]=token;
+      // Try to extract token from multi-account JSON
+      try {
+        const p=JSON.parse(row.access_token);
+        if(p&&p._multiAccount&&Array.isArray(p.accounts)){
+          const acc=song.accountKey
+            ?p.accounts.find(a=>a.key===song.accountKey)
+            :p.accounts[p.accounts.length-1];
+          if(acc){
+            // Check if this specific account token is expired
+            if(acc.expires&&new Date(acc.expires)<new Date()){
+              showTokenExpiredBanner(acc.key||'gdrive', acc.label||acc.key);
+              return;
+            }
+            token=acc.token;
+          }
+        }
+      } catch(e){}
+      if(!token) token=row.access_token;
+      if(token) connectedClouds['_tok_'+(song.accountKey||song.cloud||'gdrive')]=token;
     }
   }
-  if(!token){ toast('⚠ Reconecta Google Drive para reproducir'); return; }
+  if(!token){ showTokenExpiredBanner('gdrive','Google Drive'); return; }
 
   try {
-    toast('⏳ Cargando '+song.title+'...');
-    const res=await fetch(song.fileUrl,{headers:{Authorization:'Bearer '+token}});
-    if(!res.ok){ toast('⚠ Error '+res.status+' — reconecta Google Drive'); return; }
-    const blob=await res.blob();
-    // FIX 6: revoke previous blob URL to avoid memory leak and player stale src
+    // STREAM directly via access_token query param — no full download needed, plays instantly
     if(audioEl._blobUrl){ URL.revokeObjectURL(audioEl._blobUrl); audioEl._blobUrl=null; }
-    const blobUrl=URL.createObjectURL(blob);
-    audioEl._blobUrl=blobUrl;
-    audioEl.src=blobUrl;
-    // Wait for audio to be ready before playing
-    await new Promise((resolve, reject) => {
-      const onCanPlay = () => { audioEl.removeEventListener('canplay', onCanPlay); audioEl.removeEventListener('error', onError); resolve(); };
-      const onError = (e) => { audioEl.removeEventListener('canplay', onCanPlay); audioEl.removeEventListener('error', onError); reject(e); };
-      audioEl.addEventListener('canplay', onCanPlay, {once:true});
-      audioEl.addEventListener('error', onError, {once:true});
-      audioEl.load();
-    });
+    const streamUrl=song.fileUrl+'&access_token='+encodeURIComponent(token);
+    audioEl.src=streamUrl;
+    audioEl.load();
+    toast('▶ '+song.title+' — '+song.artist);
     try {
       await audioEl.play();
       isPlaying=true; updatePlayBtn(); syncNpModal();
-      toast('▶ '+song.title+' — '+song.artist);
     } catch(playErr){
-      console.error('play() failed:',playErr);
-      toast('Error al reproducir: '+playErr.message);
+      // If autoplay blocked, user just needs to tap play — that's fine
+      if(playErr.name==='NotAllowedError'){
+        isPlaying=false; updatePlayBtn();
+        toast('Toca ▶ para reproducir');
+      } else {
+        console.error('play() failed:',playErr);
+        toast('Error al reproducir: '+playErr.message);
+      }
     }
   } catch(fetchErr){
-    console.error('fetch failed:',fetchErr);
+    console.error('stream failed:',fetchErr);
     toast('Error de red: '+fetchErr.message);
   }
 }
@@ -2140,6 +2169,87 @@ function toggleMute(){
   const vf=document.getElementById('volFill'); if(vf) vf.style.width=isMuted?'0%':(volume*100)+'%';
 }
 
+// ══ TOKEN AUTO-REFRESH (SILENT) ══
+let _tokenRefreshTimers={};
+let _silentRefreshInProgress={};
+
+// Try to silently get a new token via hidden iframe (no user interaction needed)
+function silentRefreshGDrive(accountKey, label){
+  if(_silentRefreshInProgress[accountKey]) return _silentRefreshInProgress[accountKey];
+  const promise=new Promise((resolve,reject)=>{
+    const nonce=Math.random().toString(36).slice(2);
+    const scope='https://www.googleapis.com/auth/drive.readonly email profile';
+    const url='https://accounts.google.com/o/oauth2/v2/auth'
+      +'?client_id='+encodeURIComponent(GOOGLE_CLIENT_ID)
+      +'&redirect_uri='+encodeURIComponent(GOOGLE_REDIRECT)
+      +'&response_type=token'
+      +'&scope='+encodeURIComponent(scope)
+      +'&state='+encodeURIComponent(JSON.stringify({nonce,provider:'gdrive'}))
+      +'&prompt=none'; // KEY: silent — no UI shown to user
+    const iframe=document.createElement('iframe');
+    iframe.style.cssText='display:none;position:absolute;width:0;height:0;';
+    document.body.appendChild(iframe);
+    // Timeout after 12 seconds
+    const timer=setTimeout(()=>{ cleanup(); reject(new Error('timeout')); },12000);
+    function cleanup(){ clearTimeout(timer); window.removeEventListener('message',onMsg); if(iframe.parentNode) iframe.remove(); delete _silentRefreshInProgress[accountKey]; }
+    function onMsg(ev){
+      if(ev.origin!==window.location.origin) return;
+      const msg=ev.data; if(!msg||msg.type!=='gdrive_token'||msg.nonce!==nonce) return;
+      cleanup(); resolve(msg);
+    }
+    window.addEventListener('message',onMsg);
+    iframe.src=url;
+  });
+  _silentRefreshInProgress[accountKey]=promise;
+  return promise;
+}
+
+// Called automatically before token expires — tries silent refresh first, banner as fallback
+async function autoRefreshToken(accountKey, label){
+  console.log('🔄 Auto-refreshing token for',label||accountKey);
+  try {
+    const msg=await silentRefreshGDrive(accountKey,label);
+    // Update token in memory immediately (saveGDriveToken also reschedules next refresh)
+    connectedClouds['_tok_'+accountKey]=msg.token;
+    connectedClouds['_tok_gdrive']=msg.token;
+    await saveGDriveToken(msg.token,msg.expiresIn);
+    console.log('✅ Token auto-refreshed silently for',label||accountKey);
+  } catch(e){
+    console.warn('Silent refresh failed for',label||accountKey,':',e.message);
+    // Only show banner if truly needed (user closed Google session, etc.)
+    showTokenExpiredBanner(accountKey,label);
+  }
+}
+
+function showTokenExpiredBanner(accountKey, label){
+  const old=document.getElementById('tokenExpiredBanner'); if(old) old.remove();
+  const banner=document.createElement('div');
+  banner.id='tokenExpiredBanner';
+  banner.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9999;background:linear-gradient(90deg,#7c3aed,#dc2626);color:white;padding:11px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:0.82rem;font-family:\'DM Sans\',sans-serif;box-shadow:0 4px 20px rgba(0,0,0,0.5)';
+  banner.innerHTML='<span>🔑 Sesión de <strong>'+(label||accountKey)+'</strong> cerrada — toca para reconectar</span>'
+    +'<div style="display:flex;gap:8px;flex-shrink:0">'
+    +'<button onclick="startConnect(\'gdrive\');document.getElementById(\'tokenExpiredBanner\').remove()" style="background:white;color:#7c3aed;border:none;border-radius:8px;padding:6px 14px;font-weight:700;font-size:0.8rem;cursor:pointer">Reconectar</button>'
+    +'<button onclick="this.parentElement.parentElement.remove()" style="background:rgba(255,255,255,0.2);color:white;border:none;border-radius:8px;padding:6px 10px;font-size:0.8rem;cursor:pointer">✕</button>'
+    +'</div>';
+  document.body.prepend(banner);
+}
+
+function scheduleTokenRefresh(accountKey, label, expiresAt){
+  if(_tokenRefreshTimers[accountKey]) clearTimeout(_tokenRefreshTimers[accountKey]);
+  const msUntilExpiry=new Date(expiresAt).getTime()-Date.now();
+  // Refresh 3 minutes before expiry (or immediately if already expired/close)
+  const msUntilRefresh=Math.max(msUntilExpiry-3*60*1000, 0);
+  if(msUntilExpiry<=0){
+    // Already expired — try silent refresh right away
+    autoRefreshToken(accountKey,label); return;
+  }
+  console.log('⏱ Token for',label||accountKey,'refreshes in',Math.round(msUntilRefresh/60000),'min');
+  _tokenRefreshTimers[accountKey]=setTimeout(()=>{
+    delete _tokenRefreshTimers[accountKey];
+    autoRefreshToken(accountKey,label);
+  }, Math.min(msUntilRefresh,2147483647));
+}
+
 // ══ CLOUDS ══
 function startConnect(id){
   pendingCloud=id; const c=CLOUD_SERVICES.find(x=>x.id===id);
@@ -2190,9 +2300,15 @@ async function detectCloudCallback(){
   if(!token) return false;
   let state={}; try{state=JSON.parse(decodeURIComponent(stRaw||'{}'));}catch{}
   if(state.provider!=='gdrive') return false;
+  // Popup flow
   if(window.opener&&!window.opener.closed){
     window.opener.postMessage({type:'gdrive_token',token,expiresIn:exp,nonce:state.nonce},window.location.origin);
     window.close(); return true;
+  }
+  // Silent iframe flow — post to parent without closing
+  if(window.parent&&window.parent!==window){
+    window.parent.postMessage({type:'gdrive_token',token,expiresIn:exp,nonce:state.nonce},window.location.origin);
+    return true;
   }
   const nonce=sessionStorage.getItem('gdrive_oauth_nonce');
   if(state.nonce&&state.nonce!==nonce){toast('⚠ Sesión expirada.');return false;}
@@ -2253,6 +2369,9 @@ async function saveGDriveToken(accessToken, expiresIn){
   connectedClouds['gdrive']=true;
   connectedClouds['_tok_gdrive']=accessToken;
   connectedClouds['_tok_'+accountKey]=accessToken;
+  // Remove any expired banner for this account and schedule fresh refresh
+  const eb=document.getElementById('tokenExpiredBanner'); if(eb) eb.remove();
+  scheduleTokenRefresh(accountKey,accountEmail,exp);
 
   toast('✓ '+accountEmail+' conectada — escaneando...');
   // Scan only this new account's files (don't delete other accounts' songs)
