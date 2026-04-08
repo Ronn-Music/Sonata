@@ -1968,6 +1968,12 @@ document.addEventListener('DOMContentLoaded',function(){
 
 // ══ PLAYER ══
 const audioEl=new Audio();
+audioEl.volume=volume; // FIX: initialize volume from state variable
+// FIX: initialize volume bar UI to match initial volume
+document.addEventListener('DOMContentLoaded',function(){
+  const vf=document.getElementById('volFill');
+  if(vf) vf.style.width=(volume*100)+'%';
+});
 audioEl.addEventListener('ended',()=>nextSong());
 audioEl.addEventListener('timeupdate',()=>{
   if(!audioEl.duration) return;
@@ -2007,10 +2013,11 @@ async function playSongById(id){
   syncNpModal();
   renderHomeSongs(); renderAllSongs();
 
-  if(!song.fileUrl){ // Demo mode
-    audioEl.src=''; isPlaying=true; updatePlayBtn();
-    progress=0; songDuration=parseDur(song.duration); startProg();
-    toast('▶ '+song.title+' — '+song.artist); return;
+  if(!song.fileUrl){ // Demo mode (no fileUrl — likely token missing or not yet synced)
+    audioEl.src=''; isPlaying=false; updatePlayBtn();
+    progress=0; songDuration=parseDur(song.duration)||0;
+    updateProgressUI(); syncNpProgress();
+    toast('⚠ Sin URL de audio. Reconecta Google Drive.'); return;
   }
 
   // FIX 6: Get token — try accountKey first, then provider fallback, then parse multi-account JSON
@@ -2048,7 +2055,7 @@ async function playSongById(id){
       if(token) connectedClouds['_tok_'+(song.accountKey||song.cloud||'gdrive')]=token;
     }
   }
-  if(!token){ showTokenExpiredBanner('gdrive','Google Drive'); return; }
+  if(!token){ showTokenExpiredBanner('gdrive','Google Drive'); isPlaying=false; updatePlayBtn(); return; }
 
   // Google Drive ya no acepta access_token como query param (responde 409).
   // Solución: fetch con Authorization header → Blob URL → audioEl.src
