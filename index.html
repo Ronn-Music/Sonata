@@ -25,37 +25,38 @@
     --player-h: 90px;
   }
 
+  /* ANDROID + iOS ROOT FIX */
+  html {
+    height: 100%;
+    height: 100dvh;
+    overflow: hidden;
+    /* Prevenir texto seleccionable en UI de app */
+    -webkit-text-size-adjust: 100%;
+  }
+
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   body {
     font-family: 'DM Sans', sans-serif;
     background: var(--bg);
     color: var(--text);
-    height: 100vh;
+    height: 100%;
     height: 100dvh;
+    max-height: 100dvh;
     overflow: hidden;
-    /* Sin flex: las screens usan position:fixed y son independientes del body */
+    display: flex;
+    flex-direction: column;
+    position: fixed; /* ANDROID FIX: evita que el viewport rebote y congele la pantalla */
+    width: 100%;
+    top: 0; left: 0; right: 0; bottom: 0;
     overscroll-behavior: none;
     -webkit-tap-highlight-color: transparent;
-    touch-action: manipulation;
+    touch-action: manipulation; /* ANDROID: evita retrasos en tap de 300ms */
   }
 
   h1,h2,h3,h4 { font-family: 'Syne', sans-serif; }
 
-  /* ══ SCREENS: position:fixed para que sean overlays independientes del body ══
-     PROBLEMA EN ANDROID CHROME: con body flex-column + height:100dvh,
-     si dos screens tienen display:flex simultáneamente se reparten el espacio
-     y cada una ocupa 50% — congelando touch events. Con position:fixed cada
-     screen ocupa exactamente el viewport completo sin importar el layout del body. */
-  .screen {
-    display: none;
-    position: fixed;
-    inset: 0;           /* top:0; right:0; bottom:0; left:0 */
-    z-index: 10;
-    width: 100%;
-    height: 100%;
-    flex-direction: column;
-  }
+  .screen { display: none; width: 100%; height: 100%; }
   .screen.active { display: flex; }
 
   /* ══════════════════════════════════════
@@ -111,8 +112,10 @@
     flex-direction: column;
     align-items: center;
     justify-content: space-between;
+    height: 100vh;
+    height: 100dvh;
     background: #07070e;
-    position: fixed; /* refuerzo: ya viene de .screen */
+    position: relative;
     overflow: hidden;
     padding: 0 0 52px;
   }
@@ -399,7 +402,10 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
+    height: 100vh;
+    height: 100dvh;
     background: linear-gradient(160deg, #1a1040 0%, #0d0d1a 60%, #0a1525 100%);
+    position: relative;
     overflow-y: auto;
     padding: 30px 24px;
   }
@@ -408,7 +414,10 @@
     flex-direction: column;
     align-items: center;
     justify-content: flex-start;
+    height: 100vh;
+    height: 100dvh;
     background: linear-gradient(160deg, #1a1040 0%, #0d0d1a 60%, #0a1525 100%);
+    position: relative;
     overflow-y: auto;
     padding: 30px 24px;
   }
@@ -573,6 +582,7 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
+    height: 100vh;
     background: linear-gradient(160deg, #1a1040 0%, #0d0d1a 60%, #0a1525 100%);
     padding: 30px 24px;
     text-align: center;
@@ -603,14 +613,19 @@
   /* ══════════════════════════════════════
      MAIN APP
   ══════════════════════════════════════ */
-  /* appScreen: fixed overlay (viene de .screen) + flex column para layout interno */
-  #appScreen { flex-direction: column; }
+  #appScreen {
+    flex-direction: column;
+    height: 100%;
+    height: 100dvh;
+    overflow: hidden;
+    display: flex;
+  }
 
   .app-body {
     display: flex;
     flex: 1;
     overflow: hidden;
-    min-height: 0; /* crítico: evita que flex expanda más allá del padre */
+    min-height: 0;
   }
 
   /* SIDEBAR */
@@ -663,6 +678,9 @@
     transition: all 0.15s;
     font-size: 0.87rem;
     border-left: 3px solid transparent;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
   }
   .nav-item:hover { color: var(--text); background: rgba(124,92,252,0.07); }
   .nav-item.active { color: var(--accent2); border-left-color: var(--accent); background: rgba(124,92,252,0.12); }
@@ -895,6 +913,7 @@
     border-top: 1px solid var(--border);
     display: flex; align-items: center;
     padding: 0 22px; gap: 18px; flex-shrink: 0; z-index: 10;
+    position: relative; /* asegura que el z-index funcione */
   }
 
   .now-playing { display: flex; align-items: center; gap: 13px; width: 270px; flex-shrink: 0; }
@@ -908,10 +927,10 @@
 
   .player-controls { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 7px; }
   .ctrl-btns { display: flex; align-items: center; gap: 5px; }
-  .ctrl-btn { background: none; border: none; color: var(--text3); cursor: pointer; padding: 7px; border-radius: 50%; transition: all 0.15s; display: flex; align-items: center; justify-content: center; }
+  .ctrl-btn { background: none; border: none; color: var(--text3); cursor: pointer; padding: 7px; border-radius: 50%; transition: all 0.15s; display: flex; align-items: center; justify-content: center; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
   .ctrl-btn:hover { color: var(--text); background: rgba(255,255,255,0.06); }
   .ctrl-btn.active { color: var(--accent2); }
-  .ctrl-play { background: var(--text) !important; color: var(--bg) !important; width: 36px; height: 36px; border-radius: 50%; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; margin: 0 3px; }
+  .ctrl-play { background: var(--text) !important; color: var(--bg) !important; width: 36px; height: 36px; border-radius: 50%; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; margin: 0 3px; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
   .ctrl-play:hover { transform: scale(1.06); background: white !important; }
 
   .progress-row { display: flex; align-items: center; gap: 9px; width: 100%; max-width: 480px; }
@@ -1082,8 +1101,8 @@
     display: none;
     position: fixed;
     bottom: 0; left: 0; right: 0;
-    height: calc(60px + env(safe-area-inset-bottom));
-    padding-bottom: env(safe-area-inset-bottom);
+    height: calc(60px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
     background: var(--bg2);
     border-top: 1px solid var(--border);
     z-index: 100;
@@ -1099,12 +1118,14 @@
     cursor: pointer; font-size: 0.56rem; letter-spacing: 0.3px;
     transition: color .15s; padding: 8px 2px 6px;
     text-transform: uppercase;
+    touch-action: manipulation; /* ANDROID: elimina el delay de 300ms en tap */
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
   }
   .mobile-nav-btn svg { flex-shrink:0; }
   .mobile-nav-btn.active { color: var(--accent2); }
   .mobile-nav-btn.active svg { filter: drop-shadow(0 0 4px rgba(167,139,250,0.5)); }
 
-  /* Mobile player bar compact */
   @media (max-width: 768px) {
     /* Show mobile elements */
     .mobile-topbar { display: flex; }
@@ -1124,11 +1145,15 @@
     .sidebar.mobile-open { left: 0; }
     .sidebar-overlay { display: block; }
 
-    /* ── MOBILE LAYOUT FIX ──
-       Las screens ya son position:fixed gracias al CSS global de .screen.
-       Aquí solo reforzamos el layout interno del appScreen. */
+    /* ANDROID + iOS LAYOUT FIX:
+       - body es position:fixed, evita el freeze del viewport en Android Chrome
+       - appScreen y app-body usan flex con min-height:0 para contener el scroll */
     #appScreen {
+      height: 100%;
+      height: 100dvh;
       overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
     .app-body {
       flex: 1;
@@ -1142,9 +1167,12 @@
       height: 100%;
       overflow-y: auto;
       overflow-x: hidden;
-      /* ELIMINADO: -webkit-overflow-scrolling: touch — congela scroll en Android moderno */
+      /* ANDROID FIX: NO usar -webkit-overflow-scrolling:touch en Android moderno,
+         causa freeze. En lugar, usar overscroll-behavior */
       overscroll-behavior-y: contain;
-      touch-action: pan-y pinch-zoom;
+      touch-action: pan-y pinch-zoom; /* permite scroll y zoom, evita conflictos */
+      /* Espacio inferior para que el contenido no quede bajo player + bottom nav */
+      padding-bottom: calc(var(--player-h) + 60px + env(safe-area-inset-bottom));
     }
     .view { padding: 16px; }
     .view-header {
@@ -1213,7 +1241,7 @@
     .oauth-box { width: calc(100vw - 40px); padding: 26px 20px; }
 
     /* toast position above bottom nav */
-    .toast { bottom: 74px; }
+    .toast { bottom: calc(74px + env(safe-area-inset-bottom)); }
 
     /* Add to playlist modal fix */
     .atp-modal-box { width: calc(100vw - 32px) !important; max-height: 80vh !important; }
@@ -1227,8 +1255,8 @@
       gap: 10px;
     }
 
-    /* Padding inferior: player bar (90px) + bottom nav (60px) + espacio + safe area */
-    .view { padding-bottom: calc(var(--player-h) + 60px + 16px + env(safe-area-inset-bottom)); }
+    /* Padding inferior ya incluido en .main */
+    .view { padding-bottom: 16px; }
   }
 
   /* Extra small phones */
@@ -3016,6 +3044,28 @@ checkSession();
   if(window.visualViewport){
     window.visualViewport.addEventListener('resize', setVh, { passive: true });
   }
+})();
+
+// ── ANDROID TOUCH FIX ──
+// En Android Chrome, los botones con position:fixed a veces no reciben
+// eventos click correctamente si hay overflow o elementos superpuestos.
+// Se añaden listeners de touchstart pasivos a todos los botones del bottom nav
+// y se previene el default del touchmove en el body para evitar freeze.
+(function androidTouchFix(){
+  // Prevenir que el body scrollee (está position:fixed, pero por si acaso)
+  document.body.addEventListener('touchmove', function(e){
+    // Solo prevenir si el target no está dentro de un elemento scrolleable
+    const scrollable = e.target.closest('.main, .sidebar, #loginScreen, #registerScreen, .np-modal-body, .oauth-box, .atp-modal-box');
+    if(!scrollable) e.preventDefault();
+  }, { passive: false });
+
+  // Asegurar que los botones del bottom nav respondan inmediatamente en Android
+  document.addEventListener('DOMContentLoaded', function(){
+    const navBtns = document.querySelectorAll('.mobile-nav-btn, .nav-item, .ctrl-btn, .ctrl-play, .np-modal-close');
+    navBtns.forEach(function(btn){
+      btn.addEventListener('touchstart', function(){}, { passive: true });
+    });
+  });
 })();
 
 </script>
