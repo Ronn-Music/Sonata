@@ -2280,20 +2280,41 @@ document.addEventListener('DOMContentLoaded',function(){
 // ══ PLAYER ══
 const audioEl=new Audio();
 audioEl.volume=volume;
+// Guard para evitar que dos llamadas simultáneas a playSongById se interrumpan
+let _playRequestId = 0;
+
 document.addEventListener('DOMContentLoaded',function(){
   const vf=document.getElementById('volFill'); if(vf) vf.style.width=(volume*100)+'%';
 });
-audioEl.addEventListener('ended',()=>nextSong());
+audioEl.addEventListener('ended',()=>{
+  if(isRepeat){ audioEl.currentTime=0; audioEl.play().catch(()=>{}); }
+  else nextSong();
+});
 audioEl.addEventListener('timeupdate',()=>{
   if(!audioEl.duration) return;
   progress=Math.floor(audioEl.currentTime);
   songDuration=Math.floor(audioEl.duration);
   updateProgressUI(); syncNpProgress();
 });
-// FIX 6: handle play errors — detect 401/token expiry and show reconnect banner
+// Leer duración real cuando el audio esté listo y actualizarla en BD/memoria
+audioEl.addEventListener('loadedmetadata',()=>{
+  if(!audioEl.duration||!isFinite(audioEl.duration)) return;
+  const dur=Math.floor(audioEl.duration);
+  songDuration=dur;
+  updateProgressUI(); syncNpProgress();
+  // Actualizar duración en memoria y en BD (estaba guardada como 0)
+  if(currentSongIdx!==-1){
+    const s=songs[currentSongIdx];
+    if(!s._durUpdated){
+      s._durUpdated=true;
+      s.duration=fmt(dur);
+      // Actualizar en Supabase en background (sin bloquear)
+      _supabase.from('songs').update({duration:dur}).eq('id',s.id).then(()=>{});
+    }
+  }
+});
 audioEl.addEventListener('error',(e)=>{
   const err=audioEl.error;
-  // MediaError code 4 = MEDIA_ERR_SRC_NOT_SUPPORTED — often a 401 from Drive
   if(err&&err.code===4&&currentSongIdx!==-1){
     const song=songs[currentSongIdx];
     console.warn('Audio error code 4 (likely token expired) for',song.accountKey);
@@ -2310,7 +2331,15 @@ audioEl.addEventListener('error',(e)=>{
 async function playSongById(id){
   const idx=songs.findIndex(s=>String(s.id)===String(id));
   if(idx===-1) return;
+
+  // Guard: si ya hay una carga en curso, cancelarla antes de iniciar la nueva
+  _playRequestId++;
+  const myRequestId = _playRequestId;
+
   currentSongIdx=idx; const song=songs[idx];
+
+  // Pausar audio actual inmediatamente para evitar "play() interrupted"
+  audioEl.pause();
 
   // Update player bar UI
   document.getElementById('npTitle').textContent=song.title;
@@ -2329,7 +2358,7 @@ async function playSongById(id){
     toast('⚠ Sin URL de audio — reconecta Google Drive'); return;
   }
 
-  // FIX 6: Get token — try accountKey first, then provider fallback, then parse multi-account JSON
+  // Obtener token — intentar accountKey primero, luego proveedor, luego BD
   let token=connectedClouds['_tok_'+(song.accountKey||'')]
     ||connectedClouds['_tok_'+(song.cloud||'gdrive')];
   if(!token){
@@ -2338,7 +2367,6 @@ async function playSongById(id){
       .eq('provider',song.cloud||'gdrive').limit(1);
     const row=Array.isArray(cd)?cd[0]:cd;
     if(row?.access_token){
-      // Try to extract token from multi-account JSON
       try {
         const p=JSON.parse(row.access_token);
         if(p&&p._multiAccount&&Array.isArray(p.accounts)){
@@ -2346,16 +2374,13 @@ async function playSongById(id){
             ?p.accounts.find(a=>a.key===song.accountKey)
             :p.accounts[p.accounts.length-1];
           if(acc){
-            // Check if this specific account token is expired
             if(acc.expires&&new Date(acc.expires)<new Date()){
-              showTokenExpiredBanner(acc.key||'gdrive', acc.label||acc.key);
-              return;
+              showTokenExpiredBanner(acc.key||'gdrive', acc.label||acc.key); return;
             }
             token=acc.token;
           }
         }
       } catch(e){}
-      // Fallback: raw token (legacy non-multiAccount row) — check expiry first
       if(!token){
         const rawExpired=row.token_expires_at&&new Date(row.token_expires_at)<new Date();
         if(rawExpired){ showTokenExpiredBanner(song.accountKey||'gdrive', song.accountKey||'Google Drive'); return; }
@@ -2366,43 +2391,75 @@ async function playSongById(id){
   }
   if(!token){ showTokenExpiredBanner('gdrive','Google Drive'); return; }
 
-  // Google Drive ya no acepta access_token como query param (responde 409).
-  // Solución: fetch con Authorization header → Blob URL → audioEl.src
-  toast('⏳ Cargando '+song.title+'...');
+  // Construir URL correcta de Google Drive (extraer fileId limpio)
+  // Soporta: ?alt=media, /files/ID?alt=media, /files/ID
+  let fileUrl = song.fileUrl;
+  let fileId = null;
   try {
-    const res = await fetch(song.fileUrl, {
+    const m = fileUrl.match(/\/files\/([a-zA-Z0-9_-]+)/);
+    if(m) fileId = m[1];
+    // Si la URL guardada tiene parámetros extra o es incorrecta, reconstruirla
+    if(fileId) fileUrl = 'https://www.googleapis.com/drive/v3/files/'+fileId+'?alt=media';
+  } catch(e){}
+
+  toast('⏳ Cargando '+song.title+'...');
+
+  try {
+    const res = await fetch(fileUrl, {
       headers: { Authorization: 'Bearer ' + token }
     });
+
+    // Si esta solicitud ya fue superada por una más nueva, abandonar
+    if(myRequestId !== _playRequestId) return;
+
     if (!res.ok) {
       if (res.status === 401 || res.status === 403) {
         console.warn('Token inválido ('+res.status+') para', song.accountKey||'gdrive');
-        // Try silent refresh and retry playback automatically
         const refreshed=await autoRefreshToken(song.accountKey||'gdrive', song.accountKey||'Google Drive');
+        if(myRequestId !== _playRequestId) return;
         if(refreshed){ playSongById(id); return; }
+        isPlaying=false; updatePlayBtn();
+        toast('⚠ Token expirado. Reconecta Google Drive.');
+        return;
+      }
+      if (res.status === 404) {
+        console.warn('Archivo no encontrado en Drive (404):', fileId);
+        toast('⚠ Archivo no encontrado en Drive. Puede haber sido eliminado.');
         isPlaying=false; updatePlayBtn();
         return;
       }
       throw new Error('HTTP ' + res.status);
     }
+
     const blob = await res.blob();
+
+    // Verificar de nuevo que esta solicitud sigue siendo válida
+    if(myRequestId !== _playRequestId) return;
+
     if (audioEl._blobUrl) { URL.revokeObjectURL(audioEl._blobUrl); audioEl._blobUrl = null; }
     audioEl._blobUrl = URL.createObjectURL(blob);
     audioEl.src = audioEl._blobUrl;
     audioEl.load();
+
     toast('▶ '+song.title+' — '+song.artist);
     try {
       await audioEl.play();
+      if(myRequestId !== _playRequestId){ audioEl.pause(); return; }
       isPlaying=true; updatePlayBtn(); syncNpModal();
     } catch(playErr){
       if(playErr.name==='NotAllowedError'){
         isPlaying=false; updatePlayBtn();
         toast('Toca ▶ para reproducir');
+      } else if(playErr.name==='AbortError'){
+        // Interrumpido por nueva canción — normal, no mostrar error
+        console.log('play() aborted (new song requested)');
       } else {
         console.error('play() failed:',playErr);
         toast('Error al reproducir: '+playErr.message);
       }
     }
   } catch(fetchErr){
+    if(myRequestId !== _playRequestId) return;
     console.error('stream failed:',fetchErr);
     toast('Error de red: '+fetchErr.message);
   }
@@ -2832,7 +2889,8 @@ async function scanGDrive(token, accountKey, deleteFirst=true){
           user_id:currentUser.id, title:titulo, artist:artista, album:album,
           duration:0,
           file_path:(accountKey||'gdrive')+':'+file.id,
-          file_url:'https://www.googleapis.com/drive/v3/files/'+file.id+'?alt=media',
+          // URL limpia — playSongById construye la URL final con ?alt=media + token
+          file_url:'https://www.googleapis.com/drive/v3/files/'+file.id,
           cloud_provider:'gdrive',
           account_key: accountKey||'gdrive'
         };
