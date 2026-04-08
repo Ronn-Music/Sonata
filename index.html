@@ -38,13 +38,12 @@
     font-family: 'DM Sans', sans-serif;
     background: var(--bg);
     color: var(--text);
-    position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
-    width: 100%; height: 100%;
+    /* NO position:fixed — causa bugs en el browser de sistema Android */
+    height: 100%;
     overflow: hidden;
     overscroll-behavior: none;
     -webkit-tap-highlight-color: transparent;
-    touch-action: none;
+    touch-action: manipulation;
   }
 
   h1,h2,h3,h4 { font-family: 'Syne', sans-serif; }
@@ -411,6 +410,7 @@
     background: linear-gradient(160deg, #1a1040 0%, #0d0d1a 60%, #0a1525 100%);
     position: relative;
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
     padding: 30px 24px;
     touch-action: pan-y;
   }
@@ -422,6 +422,7 @@
     background: linear-gradient(160deg, #1a1040 0%, #0d0d1a 60%, #0a1525 100%);
     position: relative;
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
     padding: 30px 24px;
     touch-action: pan-y;
   }
@@ -617,6 +618,7 @@
      MAIN APP
   ══════════════════════════════════════ */
   #appScreen {
+    background: var(--bg); /* cubre cualquier elemento estático debajo */
     flex-direction: column;
     /* Ocupa todo el espacio heredado de .screen position:absolute */
   }
@@ -719,7 +721,7 @@
   .logout-btn:hover { color: var(--red); }
 
   /* MAIN */
-  .main { flex: 1; overflow-y: auto; background: var(--bg); }
+  .main { flex: 1; overflow-y: auto; background: var(--bg); -webkit-overflow-scrolling: touch; }
   .main::-webkit-scrollbar { width: 6px; }
   .main::-webkit-scrollbar-track { background: transparent; }
   .main::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
@@ -1125,8 +1127,9 @@
     backdrop-filter:blur(3px);
     opacity:0;
     transition:opacity .25s;
+    pointer-events: none; /* NO interceptar eventos cuando está invisible */
   }
-  .sidebar-overlay.visible { opacity:1; }
+  .sidebar-overlay.visible { opacity:1; pointer-events: auto; }
 
   /* Bottom navigation bar */
   .mobile-bottom-nav {
@@ -1176,7 +1179,7 @@
       box-shadow: 4px 0 30px rgba(0,0,0,.5);
     }
     .sidebar.mobile-open { left: 0; }
-    .sidebar-overlay { display: block; }
+    .sidebar-overlay { display: block; pointer-events: none; }
 
     /* AppScreen: flex column que llena el absolute parent */
     #appScreen {
@@ -1191,11 +1194,11 @@
     .main {
       flex: 1;
       min-height: 0;
-      overflow-y: auto;
+      overflow-y: scroll;
       overflow-x: hidden;
       overscroll-behavior-y: contain;
-      /* ANDROID FIX: pan-y permite scroll, pinch-zoom permite zoom, evita conflictos de touch */
-      touch-action: pan-y pinch-zoom;
+      -webkit-overflow-scrolling: touch;
+      touch-action: pan-y;
       /* Espacio inferior: player bar + bottom nav + safe area */
       padding-bottom: calc(var(--player-h) + 64px + env(safe-area-inset-bottom, 0px));
     }
