@@ -652,19 +652,22 @@
     border-bottom: 1px solid var(--border);
   }
   .sidebar-logo-img {
-    width: 32px; height: 32px;
+    width: 40px; height: 40px;
     border-radius: 50%;
     object-fit: cover;
+    box-shadow: 0 0 0 2px rgba(212,175,55,0.35), 0 4px 14px rgba(212,175,55,0.18);
+    flex-shrink: 0;
   }
   .sidebar-logo-name {
     font-family: 'Playfair Display', Georgia, serif;
-    font-size: 1.2rem;
+    font-size: 1.45rem;
     font-weight: 700;
-    letter-spacing: 0.5px;
-    background: linear-gradient(to right, #0d2464 0%, #0d2464 30%, #7a2800 62%, #fc4b08 100%);
+    letter-spacing: 1px;
+    background: linear-gradient(to right, #d4af37 0%, #d4af37 30%, #b8640a 62%, #fc4b08 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
+    filter: drop-shadow(0 0 10px rgba(212,175,55,0.25));
   }
 
   .sidebar-section { padding: 14px 0; border-bottom: 1px solid var(--border); }
