@@ -3470,7 +3470,9 @@ function _renderFolderLevel(parentPath){
   grid.innerHTML = [...subfolders].sort().map(name => {
     const fullPath = currentPath ? currentPath+'/'+name : name;
     const count = songs.filter(s => s.folderPath && (s.folderPath === fullPath || s.folderPath.startsWith(fullPath+'/'))).length;
-    return '<div onclick="_enterFolder(''+fullPath.replace(/'/g,"\'")+'',''+name.replace(/'/g,"\'")+'');" style="cursor:pointer;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:8px;transition:border-color 0.2s" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">'
+    const fp = JSON.stringify(fullPath);
+    const nm = JSON.stringify(name);
+    return '<div onclick="_enterFolder('+fp+','+nm+')" style="cursor:pointer;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:8px;transition:border-color 0.2s" onmouseover="this.style.borderColor=\'var(--accent)\'" onmouseout="this.style.borderColor=\'var(--border)\'">'
       + '<div style="font-size:2rem">📁</div>'
       + '<div style="font-weight:600;font-size:0.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+name+'</div>'
       + '<div style="font-size:0.72rem;color:var(--text3)">'+count+' canción'+(count!==1?'es':'')+'</div>'
