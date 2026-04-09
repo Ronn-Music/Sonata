@@ -3119,14 +3119,15 @@ async function detectCloudCallback(){
   const hasCode=search.includes('code=');
   const hasToken=hash.includes('access_token=');
   if(!hasCode&&!hasToken) return false;
-  window.history.replaceState({},document.title,window.location.pathname);
 
   if(hasCode){
     const p=new URLSearchParams(search.replace('?',''));
     const code=p.get('code'), stRaw=p.get('state');
     if(!code) return false;
+    // IMPORTANTE: verificar que el state es de Google Drive y no de Supabase auth
     let state={}; try{state=JSON.parse(decodeURIComponent(stRaw||'{}'));}catch{}
-    if(state.provider!=='gdrive') return false;
+    if(state.provider!=='gdrive') return false; // Si no es gdrive, dejar que Supabase lo maneje
+    window.history.replaceState({},document.title,window.location.pathname);
     if(window.opener&&!window.opener.closed){
       window.opener.postMessage({type:'gdrive_code',code,nonce:state.nonce},window.location.origin);
       window.close(); return true;
