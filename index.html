@@ -2928,6 +2928,7 @@ function silentRefreshGDrive(accountKey){
     const loginHint=accountKey.replace(/^gdrive:/,'');
     const nonce=Math.random().toString(36).slice(2);
     const scope='https://www.googleapis.com/auth/drive.readonly email profile';
+    // Popup minimo con prompt=none — los iframes son bloqueados por Chrome (cookies 3rd party)
     const url='https://accounts.google.com/o/oauth2/v2/auth'
       +'?client_id='+encodeURIComponent(GOOGLE_CLIENT_ID)
       +'&redirect_uri='+encodeURIComponent(GOOGLE_REDIRECT)
@@ -2937,25 +2938,22 @@ function silentRefreshGDrive(accountKey){
       +'&prompt=none'
       +'&login_hint='+encodeURIComponent(loginHint);
 
-    // Iframe oculto — Google permite prompt=none en iframes cuando la sesión sigue activa
-    const iframe=document.createElement('iframe');
-    iframe.style.cssText='position:fixed;width:1px;height:1px;top:-9999px;left:-9999px;border:none;opacity:0;pointer-events:none';
-    iframe.setAttribute('sandbox','allow-scripts allow-same-origin allow-forms allow-popups');
-    document.body.appendChild(iframe);
+    // Popup minimo — evita bloqueo de cookies 3rd party que afecta iframes en Chrome
+    const popup=window.open(url,'_sonatta_refresh','width=1,height=1,top=-100,left=-100,toolbar=no,menubar=no,scrollbars=no,resizable=no');
 
     function cleanup(result){
       clearTimeout(timer);
       window.removeEventListener('message',handler);
-      try{document.body.removeChild(iframe);}catch(e){}
+      try{if(popup&&!popup.closed)popup.close();}catch(e){}
       delete _silentRefreshInProgress[accountKey];
       resolve(result);
     }
 
-    // Timeout de 12 seg — si no responde, el usuario tiene sesión cerrada en Google
+    // Timeout de 15 seg
     const timer=setTimeout(()=>{
       console.warn('⏱ Silent refresh timeout for',accountKey);
       cleanup(null);
-    },12000);
+    },15000);
 
     function handler(ev){
       if(ev.origin!==window.location.origin)return;
@@ -2965,8 +2963,13 @@ function silentRefreshGDrive(accountKey){
     }
     window.addEventListener('message',handler);
 
-    // Cargar URL en el iframe — si la sesión de Google sigue activa, redirige al redirect_uri con el token
-    iframe.src=url;
+    // Si el popup fue bloqueado por el navegador — fallar para mostrar el banner
+    setTimeout(()=>{
+      if(!popup||popup.closed){
+        console.warn('Popup bloqueado por el navegador para',accountKey);
+        cleanup(null);
+      }
+    },800);
   });
 }
 
@@ -2995,9 +2998,9 @@ async function updateGDriveTokenOnly(accountKey,newToken,expiresIn){
   }catch(e){console.error('updateGDriveTokenOnly:',e);return false;}
 }
 
-// ── 3. Try silent iframe refresh → if fails, try small visible popup → fallback banner ──
+// ── 3. Try silent popup refresh → if fails, fallback banner ──
 async function autoRefreshToken(accountKey,label){
-  console.log('🔄 Silent refresh attempt (iframe) for',label||accountKey);
+  console.log('🔄 Silent refresh attempt (popup) for',label||accountKey);
   const result=await silentRefreshGDrive(accountKey);
   if(result&&result.token){
     await updateGDriveTokenOnly(accountKey,result.token,result.expiresIn||3600);
