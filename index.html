@@ -3424,11 +3424,17 @@ function _renderFolderLevel(parentPath){
   if(!grid) return;
 
   // Breadcrumb
-  bc.innerHTML = '<span style="cursor:pointer;color:var(--accent2)" onclick="renderFolders()">🏠 Raíz</span>';
+  bc.innerHTML = '<span id="bcRoot" style="cursor:pointer;color:var(--accent2)">🏠 Raíz</span>';
   _folderStack.forEach((item, i) => {
     bc.innerHTML += '<span style="margin:0 4px;color:var(--text3)">›</span>'
-      + '<span style="cursor:pointer;color:var(--accent2)" onclick="_navToStackIdx('+i+')">'
+      + '<span class="bc-item" data-bc-idx="'+i+'" style="cursor:pointer;color:var(--accent2)">'
       + item.name + '</span>';
+  });
+  // Bind breadcrumb clicks via JS
+  const bcRoot = document.getElementById('bcRoot');
+  if(bcRoot) bcRoot.addEventListener('click', renderFolders);
+  bc.querySelectorAll('.bc-item').forEach(el => {
+    el.addEventListener('click', () => _navToStackIdx(parseInt(el.getAttribute('data-bc-idx'))));
   });
 
   const currentPath = parentPath; // ej: "Español/Románticas"
@@ -3466,18 +3472,31 @@ function _renderFolderLevel(parentPath){
 
   title.textContent = currentPath ? currentPath.split('/').pop() : 'Carpetas';
 
-  // Renderizar carpetas
-  grid.innerHTML = [...subfolders].sort().map(name => {
+  // Renderizar carpetas — usar data-attributes para evitar problemas con caracteres especiales en onclick
+  const sortedFolders = [...subfolders].sort();
+  grid.innerHTML = sortedFolders.map((name, idx) => {
     const fullPath = currentPath ? currentPath+'/'+name : name;
     const count = songs.filter(s => s.folderPath && (s.folderPath === fullPath || s.folderPath.startsWith(fullPath+'/'))).length;
-    const fp = JSON.stringify(fullPath);
-    const nm = JSON.stringify(name);
-    return '<div onclick="_enterFolder('+fp+','+nm+')" style="cursor:pointer;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:8px;transition:border-color 0.2s" onmouseover="this.style.borderColor=\'var(--accent)\'" onmouseout="this.style.borderColor=\'var(--border)\'">'
+    // Escapar para HTML attribute (no para JS)
+    const safeName = name.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+    const safePath = fullPath.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+    return '<div class="folder-card" data-folder-path="'+safePath+'" data-folder-name="'+safeName+'" style="cursor:pointer;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:8px;transition:border-color 0.2s">'
       + '<div style="font-size:2rem">📁</div>'
       + '<div style="font-weight:600;font-size:0.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+name+'</div>'
       + '<div style="font-size:0.72rem;color:var(--text3)">'+count+' canción'+(count!==1?'es':'')+'</div>'
       + '</div>';
   }).join('');
+
+  // Bind click events via JS (evita problemas con comillas/caracteres especiales en onclick inline)
+  grid.querySelectorAll('.folder-card').forEach(card => {
+    card.addEventListener('mouseover', () => card.style.borderColor = 'var(--accent)');
+    card.addEventListener('mouseout',  () => card.style.borderColor = 'var(--border)');
+    card.addEventListener('click', () => {
+      const fp = card.getAttribute('data-folder-path');
+      const nm = card.getAttribute('data-folder-name');
+      _enterFolder(fp, nm);
+    });
+  });
 
   // Renderizar canciones de esta carpeta
   if(folderSongs.length){
