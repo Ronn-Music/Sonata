@@ -2132,10 +2132,36 @@ function updateStats(){
 function _getThumbUrl(song){
   if(song.coverUrl) return song.coverUrl;
   if(song.fileId&&song.cloud==='gdrive'){
-    const tok=connectedClouds['_tok_'+(song.accountKey||'')]||connectedClouds['_tok_gdrive']||connectedClouds['_tok_'+(song.cloud||'gdrive')];
-    if(tok) return 'https://www.googleapis.com/drive/v3/files/'+song.fileId+'/thumbnail?access_token='+encodeURIComponent(tok);
+    // Buscar token disponible
+    const tok=connectedClouds['_tok_'+(song.accountKey||'')]
+      ||connectedClouds['_tok_gdrive'];
+    if(tok&&!_thumbCache[song.fileId+'_loading']){
+      // Lanzar fetch async para obtener thumbnailLink real (lh3.googleusercontent.com — sin auth)
+      _loadThumbAsync(song.fileId, tok);
+    }
+    return _thumbCache[song.fileId]||null;
   }
   return null;
+}
+const _thumbCache={};
+async function _loadThumbAsync(fileId, tok){
+  if(_thumbCache[fileId]||_thumbCache[fileId+'_loading']) return;
+  _thumbCache[fileId+'_loading']=true;
+  try{
+    const r=await fetch('https://www.googleapis.com/drive/v3/files/'+fileId+'?fields=thumbnailLink',
+      {headers:{Authorization:'Bearer '+tok}});
+    if(!r.ok) return;
+    const d=await r.json();
+    if(d.thumbnailLink){
+      // thumbnailLink de lh3.googleusercontent.com funciona sin auth
+      _thumbCache[fileId]=d.thumbnailLink.replace(/=s[0-9]+$/,'=s400');
+      // Actualizar elementos ya renderizados con este fileId
+      document.querySelectorAll('[data-fid="'+fileId+'"]').forEach(el=>{
+        el.style.backgroundImage='url('+JSON.stringify(_thumbCache[fileId])+')';
+        el.textContent='';
+      });
+    }
+  }catch(e){}
 }
 function artStyle(song){
   const url=_getThumbUrl(song);
@@ -2151,7 +2177,7 @@ function songRowHTML(song, idx){
   return '<div class="song-row '+(playing?'playing':'')+'" data-songid="'+song.id+'" data-idx="'+idx+'">'
     +'<div class="song-num">'+(playing?'<div class="eq-bars"><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div></div>':idx)+'</div>'
     +'<div class="song-info-cell">'
-    +'<div class="song-mini-art" style="'+artStyle(song)+'">'+artInitial(song)+'</div>'
+    +'<div class="song-mini-art" data-fid="'+(song.fileId||'')+'" style="'+artStyle(song)+'">'+artInitial(song)+'</div>'
     +'<span class="song-title">'+song.title+'<span class="song-cloud-badge">'+(cl[song.cloud]||song.cloud)+'</span></span>'
     +'</div>'
     +'<div class="song-artist-cell">'+song.artist+'</div>'
@@ -2170,7 +2196,7 @@ function songGridCardHTML(song){
     artInner='<span>'+((song.artist||'?').charAt(0).toUpperCase())+'</span>';
   }
   return '<div class="song-grid-card'+(playing?' playing':'')+'" data-songid="'+song.id+'">'
-    +'<div class="song-grid-art" style="'+artStyle(song)+'">'+artInner+'</div>'
+    +'<div class="song-grid-art" data-fid="'+(song.fileId||'')+'" style="'+artStyle(song)+'">'+artInner+'</div>'
     +'<div class="song-grid-info">'
     +'<div class="song-grid-title">'+song.title+'</div>'
     +'<div class="song-grid-artist">'+song.artist+'</div>'
@@ -2237,7 +2263,7 @@ function renderRecentGrid(){
   const albs=[...new Map(songs.map(s=>[s.album,s])).values()].slice(0,6);
   el.innerHTML=albs.map(s=>
     '<div class="album-card" data-songid="'+s.id+'">'
-    +'<div class="album-art" style="'+artStyle(s)+';display:flex;align-items:center;justify-content:center;font-size:2.2rem;font-weight:800;color:rgba(255,255,255,0.2)">'+artInitial(s)+'</div>'
+    +'<div class="album-art" data-fid="'+(s.fileId||'')+'" style="'+artStyle(s)+';display:flex;align-items:center;justify-content:center;font-size:2.2rem;font-weight:800;color:rgba(255,255,255,0.2)">'+artInitial(s)+'</div>'
     +'<div class="album-info"><div class="album-name">'+s.album+'</div><div class="album-artist">'+s.artist+'</div></div>'
     +'</div>'
   ).join('');
