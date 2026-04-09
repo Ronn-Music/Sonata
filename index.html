@@ -3129,7 +3129,7 @@ async function scanGDrive(token, accountKey, deleteFirst=true){
     do {
       let url='https://www.googleapis.com/drive/v3/files'
         +'?q='+encodeURIComponent(tipos)
-        +'&fields='+encodeURIComponent('nextPageToken,files(id,name,mimeType,thumbnailLink,hasThumbnail)')
+        +'&fields='+encodeURIComponent('nextPageToken,files(id,name,mimeType,hasThumbnail)')
         +'&pageSize=1000';
       if(pageToken) url+='&pageToken='+encodeURIComponent(pageToken);
       toast('⏳ Escaneando pág '+pagina+'...');
@@ -3164,6 +3164,10 @@ async function scanGDrive(token, accountKey, deleteFirst=true){
         const titulo=partes.length>1?partes.slice(1).join(' - ').trim():nombre;
         let album='Sin álbum';
         if(partes.length>=3){ album=partes[1].trim(); }
+        // URL pública de thumbnail — no requiere autenticación (igual que CloudBeats)
+        const coverUrl = file.hasThumbnail
+          ? 'https://drive.google.com/thumbnail?id='+file.id+'&sz=w400'
+          : null;
         return {
           user_id:currentUser.id, title:titulo, artist:artista, album:album,
           duration:0,
@@ -3172,13 +3176,11 @@ async function scanGDrive(token, accountKey, deleteFirst=true){
           file_url:'https://www.googleapis.com/drive/v3/files/'+file.id,
           cloud_provider:'gdrive',
           account_key: accountKey||'gdrive',
-          // thumbnailLink de Drive ya es público (sin auth) — úsalo como carátula
-          cover_url: (file.hasThumbnail && file.thumbnailLink)
-            ? file.thumbnailLink.replace(/=s\d+$/, '=s400')
-            : null
+          cover_url: coverUrl
         };
       });
-      const{error}=await _supabase.from('songs').upsert(rows,{onConflict:'user_id,file_path',ignoreDuplicates:true});
+      // ignoreDuplicates:false => actualiza cover_url en canciones ya existentes
+      const{error}=await _supabase.from('songs').upsert(rows,{onConflict:'user_id,file_path',ignoreDuplicates:false});
       if(error) console.error('Lote '+i+':',error.message); else saved+=lote.length;
       if(i%(BATCH*5)===0&&i>0) toast('⏳ '+saved+'/'+allFiles.length+'...');
     }
