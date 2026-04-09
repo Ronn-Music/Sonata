@@ -1494,6 +1494,10 @@
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
           Playlists
         </div>
+        <div class="nav-item" onclick="showView('folders',this)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          Carpetas
+        </div>
         <div class="nav-item" onclick="showView('liked',this)">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
           Me Gusta
@@ -1623,6 +1627,20 @@
           <button class="btn-primary" style="width:auto;padding:9px 18px;font-size:0.78rem" onclick="createPlaylist()">+ Nueva playlist</button>
         </div>
         <div class="playlists-grid" id="playlistsGrid"></div>
+      </div>
+
+      <!-- CARPETAS -->
+      <div class="view" id="view-folders">
+        <div class="view-header">
+          <div>
+            <div class="view-title" id="foldersTitle">Carpetas</div>
+            <div id="foldersBreadcrumb" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:0.8rem;color:var(--text2);margin-top:4px"></div>
+          </div>
+        </div>
+        <div class="albums-grid" id="foldersGrid" style="margin-bottom:20px"></div>
+        <div class="songs-list">
+          <div id="folderSongsList"></div>
+        </div>
       </div>
 
       <!-- LIKED SONGS -->
@@ -1813,6 +1831,7 @@ function showView(name, navEl){
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   if(navEl&&navEl.classList&&navEl.classList.contains('nav-item')) navEl.classList.add('active');
   if(name==='clouds')   renderClouds();
+  if(name==='folders')  renderFolders();
   if(name==='liked')    renderLiked();
   if(name==='accounts') renderAccounts();
 }
@@ -2007,7 +2026,7 @@ async function loadSongsFromDB(){
   if(textEl)  textEl.textContent  = 'Conectando a tu biblioteca...';
 
   const {data: firstPage, error: e1} = await _supabase.from('songs')
-    .select('id,title,artist,album,duration,file_path,file_url,cloud_provider,account_key,cover_url,liked')
+    .select('id,title,artist,album,duration,file_path,file_url,cloud_provider,account_key,cover_url,liked,folder_path,folder_id')
     .eq('user_id', currentUser.id)
     .order('title', {ascending: true})
     .range(0, PAGE - 1);
@@ -2041,7 +2060,7 @@ async function _loadSongsBackground(from, PAGE, countEl, textEl){
     await new Promise(r => setTimeout(r, 80));
 
     const {data, error} = await _supabase.from('songs')
-      .select('id,title,artist,album,duration,file_path,file_url,cloud_provider,account_key,cover_url,liked')
+      .select('id,title,artist,album,duration,file_path,file_url,cloud_provider,account_key,cover_url,liked,folder_path,folder_id')
       .eq('user_id', currentUser.id)
       .order('title', {ascending: true})
       .range(from, from + PAGE - 1);
@@ -2098,7 +2117,9 @@ function _mapSongs(data){
       accountKey:s.account_key||null,
       fileUrl:s.file_url||null, filePath:s.file_path||null,
       liked:s.liked||false, coverUrl:s.cover_url||null,
-      fileId:fileId
+      fileId:fileId,
+      folderPath:s.folder_path||null,
+      folderId:s.folder_id||null
     };
   });
 }
@@ -2142,7 +2163,7 @@ function songRowHTML(song, idx){
   return '<div class="song-row '+(playing?'playing':'')+'" data-songid="'+song.id+'" data-idx="'+idx+'">'
     +'<div class="song-num">'+(playing?'<div class="eq-bars"><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div></div>':idx)+'</div>'
     +'<div class="song-info-cell">'
-    +'<div class="song-mini-art" data-fid="'+(song.fileId||'')+'" data-sid="'+song.id+'" data-ak="'+(song.accountKey||'')+'" style="'+artStyle(song)+'">'+artInitial(song)+'</div>'
+    +'<div class="song-mini-art" data-fid="'+(song.fileId||'')+'" data-ak="'+(song.accountKey||'')+'" style="'+artStyle(song)+'">'+artInitial(song)+'</div>'
     +'<span class="song-title">'+song.title+'<span class="song-cloud-badge">'+(cl[song.cloud]||song.cloud)+'</span></span>'
     +'</div>'
     +'<div class="song-artist-cell">'+song.artist+'</div>'
@@ -2161,7 +2182,7 @@ function songGridCardHTML(song){
     artInner='<span>'+((song.artist||'?').charAt(0).toUpperCase())+'</span>';
   }
   return '<div class="song-grid-card'+(playing?' playing':'')+'" data-songid="'+song.id+'">'
-    +'<div class="song-grid-art" data-fid="'+(song.fileId||'')+'" data-sid="'+song.id+'" data-ak="'+(song.accountKey||'')+'" style="'+artStyle(song)+'">'+artInner+'</div>'
+    +'<div class="song-grid-art" data-fid="'+(song.fileId||'')+'" data-ak="'+(song.accountKey||'')+'" style="'+artStyle(song)+'">'+artInner+'</div>'
     +'<div class="song-grid-info">'
     +'<div class="song-grid-title">'+song.title+'</div>'
     +'<div class="song-grid-artist">'+song.artist+'</div>'
@@ -3140,12 +3161,13 @@ async function saveGDriveToken(accessToken, expiresIn){
 async function scanGDrive(token, accountKey, deleteFirst=true){
   toast('⏳ Escaneando Google Drive...');
   try {
+    // ── PASO 1: Escanear todos los archivos de audio con su parent ──
     let allFiles=[],pageToken=null,pagina=1;
     const tipos="(mimeType='audio/mpeg' or mimeType='audio/flac' or mimeType='audio/wav' or mimeType='audio/ogg' or mimeType='audio/x-m4a' or mimeType='audio/mp4')";
     do {
       let url='https://www.googleapis.com/drive/v3/files'
         +'?q='+encodeURIComponent(tipos)
-        +'&fields='+encodeURIComponent('nextPageToken,files(id,name,mimeType)')
+        +'&fields='+encodeURIComponent('nextPageToken,files(id,name,mimeType,parents)')
         +'&pageSize=1000';
       if(pageToken) url+='&pageToken='+encodeURIComponent(pageToken);
       toast('⏳ Escaneando pág '+pagina+'...');
@@ -3157,14 +3179,41 @@ async function scanGDrive(token, accountKey, deleteFirst=true){
     } while(pageToken);
 
     if(!allFiles.length){toast('⚠ No se encontraron archivos de música');return;}
-    toast('⏳ '+allFiles.length+' canciones — guardando...');
 
-    // Only delete songs from THIS specific account, not all gdrive songs
+    // ── PASO 2: Escanear todas las carpetas para construir el árbol ──
+    toast('⏳ Escaneando carpetas...');
+    let allFolders=[],fPageToken=null;
+    do {
+      let url='https://www.googleapis.com/drive/v3/files'
+        +'?q='+encodeURIComponent("mimeType='application/vnd.google-apps.folder' and trashed=false")
+        +'&fields='+encodeURIComponent('nextPageToken,files(id,name,parents)')
+        +'&pageSize=1000';
+      if(fPageToken) url+='&pageToken='+encodeURIComponent(fPageToken);
+      const res=await fetch(url,{headers:{Authorization:'Bearer '+token}});
+      const data=await res.json();
+      if(data.error) break;
+      if(data.files&&data.files.length) allFolders=allFolders.concat(data.files);
+      fPageToken=data.nextPageToken||null;
+    } while(fPageToken);
+
+    // ── PASO 3: Construir mapa id→{name,parent} para resolver rutas ──
+    const folderMap={};
+    allFolders.forEach(f=>{ folderMap[f.id]={name:f.name,parent:f.parents?f.parents[0]:null}; });
+
+    // Función recursiva para obtener ruta completa (máx 8 niveles)
+    function getFolderPath(folderId, depth=0){
+      if(!folderId||depth>8) return '';
+      const folder=folderMap[folderId];
+      if(!folder) return '';
+      const parentPath=getFolderPath(folder.parent, depth+1);
+      return parentPath ? parentPath+'/'+folder.name : folder.name;
+    }
+
+    // ── PASO 4: Borrar y guardar canciones con folder_path ──
+    toast('⏳ '+allFiles.length+' canciones — guardando...');
     if(deleteFirst && accountKey){
       await _supabase.from('songs').delete()
-        .eq('user_id',currentUser.id)
-        .eq('cloud_provider','gdrive')
-        .eq('account_key',accountKey);
+        .eq('user_id',currentUser.id).eq('cloud_provider','gdrive').eq('account_key',accountKey);
     } else if(deleteFirst){
       await _supabase.from('songs').delete()
         .eq('user_id',currentUser.id).eq('cloud_provider','gdrive');
@@ -3180,17 +3229,20 @@ async function scanGDrive(token, accountKey, deleteFirst=true){
         const titulo=partes.length>1?partes.slice(1).join(' - ').trim():nombre;
         let album='Sin álbum';
         if(partes.length>=3){ album=partes[1].trim(); }
+        const parentId=file.parents?file.parents[0]:null;
+        const folderPath=getFolderPath(parentId);
         return {
           user_id:currentUser.id, title:titulo, artist:artista, album:album,
           duration:0,
           file_path:(accountKey||'gdrive')+':'+file.id,
-          // URL limpia — playSongById construye la URL final con ?alt=media + token
           file_url:'https://www.googleapis.com/drive/v3/files/'+file.id,
           cloud_provider:'gdrive',
-          account_key: accountKey||'gdrive'
+          account_key:accountKey||'gdrive',
+          folder_path:folderPath||null,
+          folder_id:parentId||null
         };
       });
-      const{error}=await _supabase.from('songs').upsert(rows,{onConflict:'user_id,file_path',ignoreDuplicates:true});
+      const{error}=await _supabase.from('songs').upsert(rows,{onConflict:'user_id,file_path',ignoreDuplicates:false});
       if(error) console.error('Lote '+i+':',error.message); else saved+=lote.length;
       if(i%(BATCH*5)===0&&i>0) toast('⏳ '+saved+'/'+allFiles.length+'...');
     }
@@ -3324,12 +3376,101 @@ function mobileNav(view, btn){
 })();
 
 
-// ══ ID3 COVER ART SYSTEM ══
-// Carga carátulas leyendo tags ID3 del MP3 — igual que CloudBeats
-// Solo carga las canciones visibles (lazy via IntersectionObserver)
+// ══ CARPETAS — explorador de Google Drive ══
+let _folderStack = []; // stack de navegación: [{id, name}]
 
-const _coverCache = {};      // fileId -> dataURL o 'none'
-const _coverPending = {};    // fileId -> true (ya en proceso)
+function renderFolders(){
+  _folderStack = [];
+  _renderFolderLevel(null);
+}
+
+function _renderFolderLevel(parentPath){
+  const grid = document.getElementById('foldersGrid');
+  const songsList = document.getElementById('folderSongsList');
+  const title = document.getElementById('foldersTitle');
+  const bc = document.getElementById('foldersBreadcrumb');
+  if(!grid) return;
+
+  // Breadcrumb
+  bc.innerHTML = '<span style="cursor:pointer;color:var(--accent2)" onclick="renderFolders()">🏠 Raíz</span>';
+  _folderStack.forEach((item, i) => {
+    bc.innerHTML += '<span style="margin:0 4px;color:var(--text3)">›</span>'
+      + '<span style="cursor:pointer;color:var(--accent2)" onclick="_navToStackIdx('+i+')">'
+      + item.name + '</span>';
+  });
+
+  const currentPath = parentPath; // ej: "Español/Románticas"
+
+  // Obtener subcarpetas únicas en este nivel
+  const subfolders = new Set();
+  const folderSongs = [];
+
+  songs.forEach(s => {
+    if(!s.folderPath) return;
+    if(currentPath === null){
+      // Nivel raíz: primer segmento
+      const first = s.folderPath.split('/')[0];
+      if(first) subfolders.add(first);
+    } else {
+      if(!s.folderPath.startsWith(currentPath+'/') && s.folderPath !== currentPath) return;
+      const rest = s.folderPath.slice(currentPath.length+1);
+      if(rest === ''){
+        // Esta canción está directamente en esta carpeta
+        folderSongs.push(s);
+      } else {
+        // Hay más niveles — tomar el siguiente segmento
+        const next = rest.split('/')[0];
+        if(next) subfolders.add(next);
+      }
+    }
+  });
+
+  // También canciones sin subcarpeta adicional cuando estamos en la raíz
+  if(currentPath === null){
+    songs.forEach(s => {
+      if(!s.folderPath || s.folderPath === '') folderSongs.push(s);
+    });
+  }
+
+  title.textContent = currentPath ? currentPath.split('/').pop() : 'Carpetas';
+
+  // Renderizar carpetas
+  grid.innerHTML = [...subfolders].sort().map(name => {
+    const fullPath = currentPath ? currentPath+'/'+name : name;
+    const count = songs.filter(s => s.folderPath && (s.folderPath === fullPath || s.folderPath.startsWith(fullPath+'/'))).length;
+    return '<div onclick="_enterFolder(''+fullPath.replace(/'/g,"\'")+'',''+name.replace(/'/g,"\'")+'');" style="cursor:pointer;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:8px;transition:border-color 0.2s" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">'
+      + '<div style="font-size:2rem">📁</div>'
+      + '<div style="font-weight:600;font-size:0.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+name+'</div>'
+      + '<div style="font-size:0.72rem;color:var(--text3)">'+count+' canción'+(count!==1?'es':'')+'</div>'
+      + '</div>';
+  }).join('');
+
+  // Renderizar canciones de esta carpeta
+  if(folderSongs.length){
+    songsList.innerHTML = '<div style="margin-bottom:10px;font-size:0.8rem;color:var(--text2)">'+folderSongs.length+' canciones en esta carpeta</div>'
+      + folderSongs.map((s,i) => songRowHTML(s, i+1)).join('');
+  } else {
+    songsList.innerHTML = subfolders.size ? '' : '<div style="color:var(--text3);padding:20px 0">Carpeta vacía</div>';
+  }
+
+  if(window._activateTouchOnButtons) setTimeout(window._activateTouchOnButtons, 100);
+}
+
+function _enterFolder(fullPath, name){
+  _folderStack.push({path: fullPath, name: name});
+  _renderFolderLevel(fullPath);
+}
+
+function _navToStackIdx(idx){
+  _folderStack = _folderStack.slice(0, idx+1);
+  const item = _folderStack[_folderStack.length-1];
+  _renderFolderLevel(item ? item.path : null);
+}
+
+
+// ══ ID3 COVER ART SYSTEM ══
+const _coverCache = {};
+const _coverPending = {};
 let _coverObserver = null;
 
 function _getToken(accountKey){
@@ -3340,113 +3481,81 @@ function _getToken(accountKey){
 }
 
 function _applycover(fileId, dataUrl){
-  // Actualizar todos los elementos con este fileId en el DOM
   document.querySelectorAll('[data-fid="'+fileId+'"]').forEach(el=>{
-    el.style.backgroundImage = 'url('+JSON.stringify(dataUrl)+')';
-    el.style.backgroundSize = 'cover';
-    el.style.backgroundPosition = 'center';
-    el.textContent = '';
-    // También actualizar en npArt y npModal si es la canción actual
-    const song = currentSongIdx>=0 ? songs[currentSongIdx] : null;
-    if(song && song.fileId===fileId){
-      const npArt = document.getElementById('npArt');
-      if(npArt){ npArt.style.background='url('+JSON.stringify(dataUrl)+') center/cover'; npArt.textContent=''; }
-      const cover = document.getElementById('npModalCover');
-      if(cover){
-        let img = cover.querySelector('img');
-        if(!img){ img=document.createElement('img'); img.style.cssText='position:absolute;inset:0;width:100%;height:100%;object-fit:cover;'; cover.insertBefore(img,cover.firstChild); }
-        img.src = dataUrl;
-        document.getElementById('npModalInitial').style.display='none';
-      }
-    }
+    el.style.backgroundImage='url('+JSON.stringify(dataUrl)+')';
+    el.style.backgroundSize='cover';
+    el.style.backgroundPosition='center';
+    el.textContent='';
   });
-  // Guardar en Supabase para no repetir en futuras sesiones
-  const song = songs.find(s=>s.fileId===fileId);
-  if(song && !song.coverUrl && currentUser){
-    song.coverUrl = dataUrl;
-    _supabase.from('songs').update({cover_url:dataUrl}).eq('id',song.id).then(()=>{});
+  const song=currentSongIdx>=0?songs[currentSongIdx]:null;
+  if(song&&song.fileId===fileId){
+    const npArt=document.getElementById('npArt');
+    if(npArt){npArt.style.background='url('+JSON.stringify(dataUrl)+') center/cover';npArt.textContent='';}
+    const cover=document.getElementById('npModalCover');
+    if(cover){
+      let img=cover.querySelector('img');
+      if(!img){img=document.createElement('img');img.style.cssText='position:absolute;inset:0;width:100%;height:100%;object-fit:cover;';cover.insertBefore(img,cover.firstChild);}
+      img.src=dataUrl;
+      document.getElementById('npModalInitial').style.display='none';
+    }
+  }
+  const s=songs.find(x=>x.fileId===fileId);
+  if(s&&!s.coverUrl&&currentUser){
+    s.coverUrl=dataUrl;
+    _supabase.from('songs').update({cover_url:dataUrl}).eq('id',s.id).then(()=>{});
   }
 }
 
 function _loadID3Cover(fileId, accountKey){
   if(!fileId) return;
-  if(_coverCache[fileId]){ if(_coverCache[fileId]!=='none') _applycover(fileId,_coverCache[fileId]); return; }
+  if(_coverCache[fileId]){if(_coverCache[fileId]!=='none')_applycover(fileId,_coverCache[fileId]);return;}
   if(_coverPending[fileId]) return;
-  _coverPending[fileId] = true;
-
-  const token = _getToken(accountKey);
-  if(!token){ delete _coverPending[fileId]; return; }
-
-  const url = 'https://www.googleapis.com/drive/v3/files/'+fileId+'?alt=media';
-
-  // jsmediatags puede leer solo el inicio del archivo (los tags ID3 están al principio)
-  // Usamos un fetch parcial — Range: bytes=0-131072 (128KB suficiente para tags + imagen)
-  fetch(url, {
-    headers: { Authorization: 'Bearer '+token, Range: 'bytes=0-131072' }
-  })
-  .then(r => {
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    return r.blob();
-  })
-  .then(blob => {
-    return new Promise((resolve, reject) => {
-      jsmediatags.read(blob, {
-        onSuccess: function(tag){
-          const pic = tag.tags && tag.tags.picture;
-          if(!pic){ resolve(null); return; }
-          // Convertir los bytes de la imagen a dataURL
-          const bytes = new Uint8Array(pic.data);
-          let binary = '';
-          for(let i=0;i<bytes.byteLength;i++) binary += String.fromCharCode(bytes[i]);
-          const dataUrl = 'data:'+pic.format+';base64,'+btoa(binary);
-          resolve(dataUrl);
-        },
-        onError: function(){ resolve(null); }
-      });
+  _coverPending[fileId]=true;
+  const token=_getToken(accountKey);
+  if(!token){delete _coverPending[fileId];return;}
+  const url='https://www.googleapis.com/drive/v3/files/'+fileId+'?alt=media';
+  fetch(url,{headers:{Authorization:'Bearer '+token,Range:'bytes=0-131072'}})
+  .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.blob();})
+  .then(blob=>new Promise((resolve,reject)=>{
+    jsmediatags.read(blob,{
+      onSuccess:function(tag){
+        const pic=tag.tags&&tag.tags.picture;
+        if(!pic){resolve(null);return;}
+        const bytes=new Uint8Array(pic.data);
+        let binary='';
+        for(let i=0;i<bytes.byteLength;i++) binary+=String.fromCharCode(bytes[i]);
+        resolve('data:'+pic.format+';base64,'+btoa(binary));
+      },
+      onError:function(){resolve(null);}
     });
+  }))
+  .then(dataUrl=>{
+    _coverPending[fileId]=false;
+    if(dataUrl){_coverCache[fileId]=dataUrl;_applycover(fileId,dataUrl);}
+    else _coverCache[fileId]='none';
   })
-  .then(dataUrl => {
-    _coverPending[fileId] = false;
-    if(dataUrl){
-      _coverCache[fileId] = dataUrl;
-      _applycover(fileId, dataUrl);
-    } else {
-      _coverCache[fileId] = 'none';
-    }
-  })
-  .catch(()=>{ _coverPending[fileId]=false; _coverCache[fileId]='none'; });
+  .catch(()=>{_coverPending[fileId]=false;_coverCache[fileId]='none';});
 }
 
 function _initCoverObserver(){
   if(_coverObserver) _coverObserver.disconnect();
-  _coverObserver = new IntersectionObserver((entries)=>{
+  _coverObserver=new IntersectionObserver((entries)=>{
     entries.forEach(entry=>{
       if(entry.isIntersecting){
-        const el = entry.target;
-        const fileId = el.dataset.fid;
-        const accountKey = el.dataset.ak||null;
-        if(fileId && !_coverCache[fileId]){
-          _loadID3Cover(fileId, accountKey);
-        } else if(fileId && _coverCache[fileId] && _coverCache[fileId]!=='none'){
-          _applycover(fileId, _coverCache[fileId]);
-        }
-        _coverObserver.unobserve(el); // unobserve después de cargar
+        const el=entry.target;
+        const fileId=el.dataset.fid;
+        const accountKey=el.dataset.ak||null;
+        if(fileId&&!_coverCache[fileId]) _loadID3Cover(fileId,accountKey);
+        else if(fileId&&_coverCache[fileId]&&_coverCache[fileId]!=='none') _applycover(fileId,_coverCache[fileId]);
+        _coverObserver.unobserve(el);
       }
     });
-  }, { rootMargin: '200px', threshold: 0 });
-
-  // Observar todos los elementos con data-fid
-  document.querySelectorAll('[data-fid]').forEach(el=>{
-    if(el.dataset.fid) _coverObserver.observe(el);
-  });
+  },{rootMargin:'200px',threshold:0});
+  document.querySelectorAll('[data-fid]').forEach(el=>{if(el.dataset.fid)_coverObserver.observe(el);});
 }
 
-// Llamar después de cada render
-const _origRenderAll = window.renderAll;
-window.renderAll = function(){
-  if(_origRenderAll) _origRenderAll();
-  setTimeout(_initCoverObserver, 100);
-};
+const _origRenderAll=window.renderAll;
+window.renderAll=function(){if(_origRenderAll)_origRenderAll();setTimeout(_initCoverObserver,100);};
 
 // ══ BOOT ══
 document.getElementById('welcomeLogoImg').src=LOGO_B64;
