@@ -1941,6 +1941,27 @@
         </div>
       </div>
 
+      <!-- LIMPIAR DUPLICADOS -->
+      <div class="settings-card" style="border-color:rgba(251,191,36,0.3)">
+        <div class="settings-card-header">
+          <div class="settings-icon" style="background:rgba(251,191,36,0.15);font-size:1.3rem">🗑</div>
+          <div>
+            <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:1rem">Limpiar duplicados</div>
+            <div style="font-size:0.78rem;color:var(--text3);margin-top:2px">Elimina canciones duplicadas de la base de datos (mantiene la mejor copia)</div>
+          </div>
+        </div>
+        <div id="dedupStatus" style="margin:14px 0;font-size:0.82rem;color:var(--text2);background:var(--bg3);border-radius:10px;padding:12px 15px;display:none;line-height:1.6;"></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <button onclick="cleanDuplicates()" style="
+            padding:10px 20px;border:none;border-radius:10px;
+            background:linear-gradient(135deg,#f59e0b,#d97706);
+            color:white;font-family:'Syne',sans-serif;font-weight:600;
+            font-size:0.83rem;cursor:pointer;transition:opacity 0.2s;
+          ">🧹 Limpiar duplicados</button>
+          <span id="dedupCount" style="font-size:0.78rem;color:var(--text3)"></span>
+        </div>
+      </div>
+
     </main>
   </div>
 
@@ -2345,7 +2366,7 @@ async function loadSongsFromDB(){
   if(e1){ console.error('loadSongs err:', e1.message); songs=[]; _hideLoadingOverlay(); return; }
   if(!firstPage || !firstPage.length){ songs=[]; _hideLoadingOverlay(); return; }
 
-  songs = _mapSongs(firstPage);
+  songs = _dedupSongs(_mapSongs(firstPage));
   if(countEl) countEl.textContent = songs.length;
   if(textEl)  textEl.textContent  = 'canciones cargadas';
   console.log('Songs loaded:', songs.length);
@@ -2379,7 +2400,7 @@ async function _loadSongsBackground(from, PAGE, countEl, textEl){
     if(error){ console.error('loadSongs bg err:', error.message); break; }
     if(!data || !data.length) break;
 
-    songs = songs.concat(_mapSongs(data));
+    songs = _dedupSongs(songs.concat(_mapSongs(data)));
     from += PAGE;
     console.log('Songs loaded:', songs.length);
     if(countEl) countEl.textContent = songs.length;
@@ -2406,6 +2427,24 @@ function _hideLoadingOverlay(){
     renderHomeSongs(); renderRecentGrid(); updateStats();
     setTimeout(()=>{ overlay.style.display='none'; }, 450);
   }
+}
+
+// ── DEDUP EN MEMORIA: elimina duplicados por fileId, conservando el mejor registro ──
+function _dedupSongs(arr){
+  const byFileId={};
+  const noFileId=[];
+  arr.forEach(s=>{
+    if(!s.fileId){ noFileId.push(s); return; }
+    const existing=byFileId[s.fileId];
+    if(!existing){
+      byFileId[s.fileId]=s;
+    } else {
+      // Conservar el que tenga más datos: cover > duration > liked
+      const score=(x)=>(x.coverUrl?4:0)+(x.duration&&x.duration!=='0:00'?2:0)+(x.liked?1:0);
+      if(score(s)>score(existing)) byFileId[s.fileId]=s;
+    }
+  });
+  return [...Object.values(byFileId), ...noFileId];
 }
 
 function _mapSongs(data){
@@ -4367,6 +4406,85 @@ async function startCoverSync(){
 
 function stopCoverSync(){
   _syncStop = true;
+}
+
+// ══ LIMPIAR DUPLICADOS EN BD ══
+async function cleanDuplicates(){
+  const status = document.getElementById('dedupStatus');
+  const countEl = document.getElementById('dedupCount');
+  if(!currentUser){ toast('Debes iniciar sesión'); return; }
+  status.style.display = 'block';
+  status.innerHTML = '⏳ Analizando canciones en la base de datos...';
+  countEl.textContent = '';
+
+  // Cargar todos los IDs de canciones con su file_path
+  const { data, error } = await _supabase.from('songs')
+    .select('id,file_path,cover_url,duration,liked')
+    .eq('user_id', currentUser.id)
+    .order('created_at', { ascending: true });
+
+  if(error){ status.innerHTML = '❌ Error: ' + error.message; return; }
+  if(!data || !data.length){ status.innerHTML = '✅ No hay canciones en la base de datos.'; return; }
+
+  // Agrupar por fileId extraído del file_path
+  const byFileId = {};
+  const noFileId = [];
+
+  data.forEach(s => {
+    let fileId = null;
+    if(s.file_path){
+      const parts = s.file_path.split(':');
+      for(let i = parts.length - 1; i >= 0; i--){
+        const seg = parts[i];
+        if(seg && seg.length >= 15 && /^[a-zA-Z0-9_-]+$/.test(seg) && !seg.includes('@') && !seg.includes('.')){
+          fileId = seg; break;
+        }
+      }
+    }
+    if(!fileId){ noFileId.push(s); return; }
+    if(!byFileId[fileId]) byFileId[fileId] = [];
+    byFileId[fileId].push(s);
+  });
+
+  // Encontrar grupos con duplicados
+  const score = (x) => (x.cover_url ? 4 : 0) + (x.duration && x.duration > 0 ? 2 : 0) + (x.liked ? 1 : 0);
+  const toDelete = [];
+
+  Object.values(byFileId).forEach(group => {
+    if(group.length <= 1) return;
+    // Ordenar: el mejor primero
+    group.sort((a, b) => score(b) - score(a));
+    // Los demás se eliminan
+    group.slice(1).forEach(s => toDelete.push(s.id));
+  });
+
+  if(!toDelete.length){
+    status.innerHTML = '✅ ¡Sin duplicados! Tu biblioteca está limpia (' + data.length + ' canciones únicas).';
+    return;
+  }
+
+  status.innerHTML = '🗑 Encontrados <b>' + toDelete.length + '</b> duplicados de ' + data.length + ' canciones totales.<br>Eliminando...';
+
+  // Eliminar en lotes de 100
+  const BATCH = 100;
+  let deleted = 0;
+  for(let i = 0; i < toDelete.length; i += BATCH){
+    const batch = toDelete.slice(i, i + BATCH);
+    const { error: delErr } = await _supabase.from('songs').delete().in('id', batch).eq('user_id', currentUser.id);
+    if(delErr){ status.innerHTML += '<br>⚠ Error eliminando lote: ' + delErr.message; break; }
+    deleted += batch.length;
+    status.innerHTML = '🗑 Eliminando... <b>' + deleted + '/' + toDelete.length + '</b>';
+    await new Promise(r => setTimeout(r, 100));
+  }
+
+  status.innerHTML = '🎉 <b>¡Listo!</b> Se eliminaron <b>' + deleted + '</b> duplicados.<br>'
+    + 'Canciones únicas restantes: <b>' + (data.length - deleted) + '</b>';
+  countEl.textContent = '';
+  toast('✅ ' + deleted + ' duplicados eliminados');
+
+  // Recargar biblioteca
+  await loadSongsFromDB();
+  renderAll();
 }
 
 // ══ BOOT ══
