@@ -1962,11 +1962,11 @@ async function checkSession(){
     if(hasHash){
       const token=p.get('access_token'),exp=parseInt(p.get('expires_in')||'3600');
       if(token&&state.provider==='gdrive'){
-        window.parent.postMessage({type:'gdrive_token',token,expiresIn:exp,nonce:state.nonce},window.location.origin);
+        window.parent.postMessage({type:'gdrive_token',token,expiresIn:exp,nonce:state.nonce,silent:!!state.silent},window.location.origin);
         return;
       }
     } else if(hasError){
-      window.parent.postMessage({type:'gdrive_token_error',error:p.get('error'),nonce:state.nonce},window.location.origin);
+      window.parent.postMessage({type:'gdrive_token',token:null,error:p.get('error'),nonce:state.nonce,silent:!!state.silent},window.location.origin);
       return;
     }
   }
@@ -2959,33 +2959,91 @@ async function silentRefreshGDrive(accountKey){
         refreshToken=p.refresh_token;
       }
     }catch(e){ refreshToken=null; }
-    if(!refreshToken){
-      console.log('\u2139\ufe0f Sin refresh_token en BD para',accountKey,'— se necesita reconectar con OAuth para obtenerlo');
-      delete _silentRefreshInProgress[accountKey];
-      return null;
+
+    // ESTRATEGIA 1: refresh_token en servidor (permanente, no requiere interaccion)
+    if(refreshToken){
+      console.log('\u{1f511} refresh_token encontrado para',accountKey,'(',refreshToken.substring(0,8),'...) — llamando /api/refresh-token');
+      const{data:{session}}=await _supabase.auth.getSession();
+      const supaToken=session?.access_token||'';
+      const res=await fetch('/api/refresh-token',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+supaToken},
+        body:JSON.stringify({refresh_token:refreshToken})
+      });
+      const data=await res.json();
+      if(data.access_token){
+        delete _silentRefreshInProgress[accountKey];
+        console.log('\u2705 Token renovado via refresh_token para',accountKey);
+        return {token:data.access_token, expiresIn:data.expires_in||3600};
+      }
+      console.warn('Refresh via refresh_token fallo para',accountKey,'status:',res.status,'error:',data.error,'desc:',data.error_description||data.message||'');
+    } else {
+      console.log('\u2139\ufe0f Sin refresh_token en BD para',accountKey,'— intentando iframe silencioso prompt=none');
     }
-    console.log('\u{1f511} refresh_token encontrado para',accountKey,'(',refreshToken.substring(0,8),'...) — llamando /api/refresh-token');
-    // Llamar al Edge Function en Vercel (tiene el client_secret de forma segura)
-    const{data:{session}}=await _supabase.auth.getSession();
-    const supaToken=session?.access_token||'';
-    const res=await fetch('/api/refresh-token',{
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+supaToken},
-      body:JSON.stringify({refresh_token:refreshToken})
-    });
-    const data=await res.json();
+
+    // ESTRATEGIA 2: iframe silencioso con prompt=none (usa sesion activa de Google en browser)
+    // Funciona si el usuario tiene Google abierto en el mismo browser
+    const iframeResult = await _silentIframeRefresh(accountKey);
     delete _silentRefreshInProgress[accountKey];
-    if(data.access_token){
-      console.log('\u2705 Token renovado automaticamente para',accountKey);
-      return {token:data.access_token, expiresIn:data.expires_in||3600};
-    }
-    console.warn('Refresh fallido para',accountKey,'status:',res.status,'error:',data.error,'desc:',data.error_description||data.message||'');
-    return null;
+    return iframeResult;
+
   }catch(e){
     console.error('silentRefreshGDrive error:',e);
     delete _silentRefreshInProgress[accountKey];
     return null;
   }
+}
+
+// Intenta obtener un access_token nuevo via iframe invisible con prompt=none
+// No muestra ningun popup ni interfaz al usuario
+function _silentIframeRefresh(accountKey){
+  return new Promise((resolve)=>{
+    const timeout=setTimeout(()=>{
+      cleanup();
+      console.log('iframe silencioso timeout para',accountKey);
+      resolve(null);
+    }, 8000);
+
+    const nonce='silent_'+Math.random().toString(36).slice(2);
+    // Extraer email del accountKey (formato: "gdrive:email@gmail.com")
+    const hint=accountKey.includes(':')?accountKey.split(':').slice(1).join(':'):'';
+    const scope='https://www.googleapis.com/auth/drive.readonly email profile';
+    const url='https://accounts.google.com/o/oauth2/v2/auth'
+      +'?client_id='+encodeURIComponent(GOOGLE_CLIENT_ID)
+      +'&redirect_uri='+encodeURIComponent(GOOGLE_REDIRECT)
+      +'&response_type=token'  // implicit — devuelve access_token directo en hash
+      +'&scope='+encodeURIComponent(scope)
+      +'&prompt=none'          // NO mostrar UI — falla si no hay sesion activa
+      +(hint?'&login_hint='+encodeURIComponent(hint):'')
+      +'&state='+encodeURIComponent(JSON.stringify({nonce,provider:'gdrive',silent:true}));
+
+    const iframe=document.createElement('iframe');
+    iframe.style.cssText='position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;border:none;left:-9999px;top:-9999px';
+    iframe.src=url;
+
+    function onMsg(ev){
+      if(ev.origin!==window.location.origin) return;
+      const msg=ev.data;
+      if(!msg||msg.type!=='gdrive_token'||msg.nonce!==nonce) return;
+      cleanup();
+      if(msg.token){
+        console.log('\u2705 Token obtenido via iframe silencioso para',accountKey);
+        resolve({token:msg.token, expiresIn:msg.expiresIn||3600});
+      } else {
+        console.log('iframe silencioso: no se obtuvo token (posible error:',msg.error,')');
+        resolve(null);
+      }
+    }
+
+    function cleanup(){
+      clearTimeout(timeout);
+      window.removeEventListener('message',onMsg);
+      try{iframe.remove();}catch(e){}
+    }
+
+    window.addEventListener('message',onMsg);
+    document.body.appendChild(iframe);
+  });
 }
 
 // ── 2. Update token in memory + Supabase WITHOUT rescanning Drive ──
@@ -3179,7 +3237,9 @@ async function detectCloudCallback(){
         body:JSON.stringify({code,redirect_uri:GOOGLE_REDIRECT})
       });
       const data=await res.json();
+      console.log('exchange-code response — access_token:', !!data.access_token, '| refresh_token:', !!data.refresh_token, '| error:', data.error||'none');
       if(!data.access_token){toast('Error al conectar: '+(data.error||'?'));return false;}
+      if(!data.refresh_token) console.warn('ATENCION: Google no devolvio refresh_token — el token expirara en', data.expires_in||3600, 'seg y no se podra renovar automaticamente');
       await saveGDriveToken(data.access_token,data.expires_in||3600,data.refresh_token);
     }catch(e){toast('Error: '+e.message); return false;}
     return true;
@@ -3239,7 +3299,10 @@ async function saveGDriveToken(accessToken, expiresIn, refreshToken=null){
   // IMPORTANT: save old refresh_token BEFORE filtering, or it gets lost
   const _oldRefreshToken = accounts.find(a=>a.key===accountKey)?.refresh_token || null;
   accounts=accounts.filter(a=>a.key!==accountKey);
-  accounts.push({key:accountKey,label:accountEmail,token:accessToken,expires:exp,refresh_token:refreshToken||_oldRefreshToken||null});
+  const finalRefreshToken = refreshToken||_oldRefreshToken||null;
+  if(finalRefreshToken) console.log('\u2705 refresh_token guardado para',accountKey,'(',finalRefreshToken.substring(0,8),'...) — renovacion automatica activada');
+  else console.warn('\u26a0\ufe0f SIN refresh_token para',accountKey,'— solo el iframe silencioso podra renovar mientras el usuario tenga Google abierto');
+  accounts.push({key:accountKey,label:accountEmail,token:accessToken,expires:exp,refresh_token:finalRefreshToken});
 
   const tokenJson=JSON.stringify({_multiAccount:true,accounts});
   const upsertData={user_id:currentUser.id,provider:'gdrive',account_key:accountKey,
