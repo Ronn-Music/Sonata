@@ -1268,6 +1268,74 @@
   }
 
 </style>
+<script>
+/* ══ SONATTA — PROTECCIÓN DE CÓDIGO ══
+   Protege la lógica de reproducción, conexión de nubes y autenticación
+   contra inspección, copia y manipulación en el cliente.
+*/
+(function _protect(){
+  'use strict';
+
+  // 1. Deshabilitar clic derecho
+  document.addEventListener('contextmenu', function(e){ e.preventDefault(); }, true);
+
+  // 2. Deshabilitar atajos de teclado comunes de inspección
+  document.addEventListener('keydown', function(e){
+    // F12, Ctrl+Shift+I/J/C/U, Ctrl+U (ver fuente)
+    if(
+      e.key==='F12' ||
+      (e.ctrlKey && e.shiftKey && ['I','J','C','i','j','c'].includes(e.key)) ||
+      (e.ctrlKey && ['u','U'].includes(e.key)) ||
+      (e.ctrlKey && e.shiftKey && e.key==='K') // Firefox consola
+    ){
+      e.preventDefault();
+      e.stopPropagation();
+      return false;
+    }
+  }, true);
+
+  // 3. Deshabilitar selección de texto en la app (no afecta inputs)
+  document.addEventListener('selectstart', function(e){
+    if(e.target.tagName!=='INPUT' && e.target.tagName!=='TEXTAREA'){
+      e.preventDefault();
+    }
+  }, true);
+
+  // 4. Detección de DevTools abierto — pausa reproducción y muestra aviso
+  (function _devDetect(){
+    let devOpen=false;
+    const threshold=160;
+    function check(){
+      const w=window.outerWidth-window.innerWidth>threshold;
+      const h=window.outerHeight-window.innerHeight>threshold;
+      if((w||h)&&!devOpen){
+        devOpen=true;
+        // Pausa reproducción si está activa
+        try{ if(window._audio && !window._audio.paused) window._audio.pause(); }catch(e){}
+        try{ console.clear(); }catch(e){}
+        try{ console.log('%c⛔ Sonatta','color:#f87171;font-size:40px;font-weight:900'); }catch(e){}
+        try{ console.log('%cEsta aplicación es propietaria. El acceso al código fuente no está autorizado.','color:#a0a0c0;font-size:14px'); }catch(e){}
+      }
+      if(!w&&!h) devOpen=false;
+    }
+    setInterval(check,1000);
+  })();
+
+  // 5. Proteger tokens de nube: sobrescribir console en producción
+  (function _hideTokens(){
+    const _noop=()=>{};
+    // Solo silenciar en dominio de producción (no en localhost)
+    if(!location.hostname.includes('localhost') && !location.hostname.includes('127.0.0.1')){
+      const safe={error:console.error.bind(console)};
+      console.log=_noop; console.debug=_noop; console.info=_noop;
+      console.warn=_noop; console.table=_noop; console.dir=_noop;
+      // Mantener error para fallos reales
+      console.error=safe.error;
+    }
+  })();
+
+})();
+</script>
 </head>
 <body>
 
@@ -2192,9 +2260,15 @@ async function loadPlaylists(){
 // ══ STATS ══
 function updateStats(){
   const accounts=connectedClouds._accounts||[];
-  // Contar providers que tienen al menos 1 cuenta activa (no expirada)
-  const activeProviders=new Set(accounts.filter(a=>!a.expired).map(a=>a.provider));
-  const cc=activeProviders.size;
+  // Contar cuentas activas únicas (por account_key) — soporta múltiples cuentas del mismo proveedor
+  const activeKeys=new Set(
+    accounts
+      .filter(a=>!a.expired && a.account_key && a.account_key!=='gdrive' && a.account_key!=='gdrive:legacy')
+      .map(a=>a.account_key)
+  );
+  // Si no hay keys específicos, caer en providers únicos (cuentas legacy)
+  const cc=activeKeys.size ||
+    new Set(accounts.filter(a=>!a.expired).map(a=>a.provider)).size;
   const albs=[...new Set(songs.map(s=>s.album))];
   const arts=[...new Set(songs.map(s=>s.artist))];
   document.getElementById('statSongs').textContent=songs.length;
