@@ -658,6 +658,12 @@
     box-shadow: 0 0 0 2px rgba(212,175,55,0.35), 0 4px 14px rgba(212,175,55,0.18);
     flex-shrink: 0;
   }
+  .sidebar-logo-icon {
+    width: 40px; height: 40px;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    filter: drop-shadow(0 0 8px rgba(212,175,55,0.4));
+  }
   .sidebar-logo-name {
     font-family: 'Playfair Display', Georgia, serif;
     font-size: 1.45rem;
@@ -1551,7 +1557,30 @@
     <!-- SIDEBAR -->
     <aside class="sidebar">
       <div class="sidebar-logo">
-        <img class="sidebar-logo-img" id="sidebarLogoImg" src="" alt="Sonatta">
+        <div class="sidebar-logo-icon" id="sidebarLogoImg">
+          <svg viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg" width="38" height="38">
+            <defs>
+              <radialGradient id="sbBg" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="#1a1520"/>
+                <stop offset="100%" stop-color="#0d0d18"/>
+              </radialGradient>
+              <radialGradient id="sbGlow" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="rgba(212,175,55,0.18)"/>
+                <stop offset="100%" stop-color="rgba(212,175,55,0)"/>
+              </radialGradient>
+            </defs>
+            <!-- Outer glow -->
+            <circle cx="30" cy="30" r="29" fill="url(#sbGlow)"/>
+            <!-- Outer ring -->
+            <circle cx="30" cy="30" r="27" fill="none" stroke="rgba(212,175,55,0.55)" stroke-width="1.2"/>
+            <!-- Middle ring -->
+            <circle cx="30" cy="30" r="22" fill="none" stroke="rgba(212,175,55,0.25)" stroke-width="0.8"/>
+            <!-- Inner circle dark bg -->
+            <circle cx="30" cy="30" r="18" fill="url(#sbBg)" stroke="rgba(212,175,55,0.6)" stroke-width="1.3"/>
+            <!-- Treble clef -->
+            <text x="30" y="38" text-anchor="middle" font-size="22" fill="white" font-family="Georgia, serif" style="font-weight:400">𝄞</text>
+          </svg>
+        </div>
         <span class="sidebar-logo-name">Sonatta</span>
       </div>
 
@@ -3957,7 +3986,6 @@ window.renderAll=function(){if(_origRenderAll)_origRenderAll();setTimeout(_initC
 // ══ BOOT ══
 document.getElementById('welcomeLogoImg').src=LOGO_B64;
 document.getElementById('mobileTopbarLogo').src=LOGO_B64;
-document.getElementById('sidebarLogoImg').src=LOGO_B64;
 document.querySelectorAll('.loginLogoImg, .registerLogoImg').forEach(el=>el.src=LOGO_B64);
 checkSession();
 
