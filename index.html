@@ -2442,6 +2442,8 @@ function _mapSongs(data){
       if(m) fileId=m[1];
     }
 
+    // Pre-cargar cache de carátulas desde BD para no re-descargar lo que ya tenemos
+    if(s.cover_url && fileId) _coverCache[fileId] = s.cover_url;
     return {
       id:s.id, title:s.title||'Sin título', artist:s.artist||'Desconocido',
       album:(s.album&&s.album!=='Google Drive')?s.album:'Sin álbum',
@@ -3735,7 +3737,7 @@ async function scanGDrive(token, accountKey, deleteFirst=true){
     do {
       let url='https://www.googleapis.com/drive/v3/files'
         +'?q='+encodeURIComponent(tipos)
-        +'&fields='+encodeURIComponent('nextPageToken,files(id,name,mimeType,parents)')
+        +'&fields='+encodeURIComponent('nextPageToken,files(id,name,mimeType,parents,videoMediaMetadata)')
         +'&pageSize=1000';
       if(pageToken) url+='&pageToken='+encodeURIComponent(pageToken);
       toast('⏳ Escaneando pág '+pagina+'...');
@@ -3799,9 +3801,13 @@ async function scanGDrive(token, accountKey, deleteFirst=true){
         if(partes.length>=3){ album=partes[1].trim(); }
         const parentId=file.parents?file.parents[0]:null;
         const folderPath=getFolderPath(parentId);
+        // Intentar obtener duración desde metadata de Drive (disponible para algunos formatos)
+        const driveDurMs=file.videoMediaMetadata&&file.videoMediaMetadata.durationMillis
+          ?parseInt(file.videoMediaMetadata.durationMillis):0;
+        const driveDurSec=driveDurMs>0?Math.floor(driveDurMs/1000):0;
         return {
           user_id:currentUser.id, title:titulo, artist:artista, album:album,
-          duration:0,
+          duration:driveDurSec,
           file_path:(accountKey||'gdrive')+':'+file.id,
           file_url:'https://www.googleapis.com/drive/v3/files/'+file.id,
           cloud_provider:'gdrive',
@@ -4128,38 +4134,67 @@ function _fetchCover(fileId, accountKey){
     ||null;
   if(!token){_coverPending[fileId]=false;return Promise.resolve();}
   const url='https://www.googleapis.com/drive/v3/files/'+fileId+'?alt=media';
-  // 512KB — suficiente para cubrir tags ID3 al inicio Y carátulas grandes
   return fetch(url,{headers:{Authorization:'Bearer '+token,Range:'bytes=0-524287'}})
   .then(r=>{
-    if(r.status===401||r.status===403){
-      _coverPending[fileId]=false;
-      return null;
-    }
+    if(r.status===401||r.status===403){_coverPending[fileId]=false;return null;}
     if(!r.ok) throw new Error('HTTP '+r.status);
     return r.blob();
   })
-  .then(blob=>blob?new Promise((resolve)=>{
-    jsmediatags.read(blob,{
-      onSuccess:function(tag){
-        const pic=tag.tags&&tag.tags.picture;
-        if(!pic){resolve(null);return;}
-        const bytes=new Uint8Array(pic.data);
-        let binary='';
-        for(let i=0;i<bytes.byteLength;i++) binary+=String.fromCharCode(bytes[i]);
-        resolve('data:'+pic.format+';base64,'+btoa(binary));
-      },
-      onError:function(){resolve(null);}
+  .then(blob=>{
+    if(!blob) return Promise.resolve(null);
+    // ── EXTRACCIÓN DE DURACIÓN: aprovechar blob ya descargado ──
+    try {
+      const _durUrl=URL.createObjectURL(blob);
+      const _tmpAudio=new Audio();
+      _tmpAudio.preload='metadata';
+      const _cleanup=()=>{try{URL.revokeObjectURL(_durUrl);_tmpAudio.src='';}catch(e){}};
+      const _t=setTimeout(_cleanup,6000);
+      _tmpAudio.addEventListener('loadedmetadata',()=>{
+        clearTimeout(_t);
+        const dur=isFinite(_tmpAudio.duration)&&_tmpAudio.duration>0?Math.floor(_tmpAudio.duration):0;
+        _cleanup();
+        if(dur>0){
+          const s=songs.find(x=>x.fileId===fileId);
+          if(s&&!s._durUpdated){
+            s._durUpdated=true; s.duration=fmt(dur);
+            document.querySelectorAll('[data-songid="'+s.id+'"] .song-dur').forEach(el=>el.textContent=s.duration);
+            if(currentUser) _supabase.from('songs').update({duration:dur}).eq('id',s.id).then(()=>{});
+          }
+        }
+      });
+      _tmpAudio.addEventListener('error',()=>{clearTimeout(_t);_cleanup();});
+      _tmpAudio.src=_durUrl;
+    }catch(e){}
+    // ── EXTRACCIÓN DE CARÁTULA ──
+    return new Promise((resolve)=>{
+      jsmediatags.read(blob,{
+        onSuccess:function(tag){
+          // Revisar TLEN como fuente adicional de duración
+          try{
+            const tlen=tag.tags&&(tag.tags.TLEN||tag.tags.TLE);
+            const ms=tlen?parseInt(typeof tlen==='object'?tlen.data:tlen):0;
+            if(ms>0&&!isNaN(ms)){
+              const s=songs.find(x=>x.fileId===fileId);
+              if(s&&!s._durUpdated){s._durUpdated=true;s.duration=fmt(Math.floor(ms/1000));
+                document.querySelectorAll('[data-songid="'+s.id+'"] .song-dur').forEach(el=>el.textContent=s.duration);
+                if(currentUser) _supabase.from('songs').update({duration:Math.floor(ms/1000)}).eq('id',s.id).then(()=>{});}
+            }
+          }catch(e){}
+          const pic=tag.tags&&tag.tags.picture;
+          if(!pic){resolve(null);return;}
+          const bytes=new Uint8Array(pic.data);
+          let binary='';
+          for(let i=0;i<bytes.byteLength;i++) binary+=String.fromCharCode(bytes[i]);
+          resolve('data:'+pic.format+';base64,'+btoa(binary));
+        },
+        onError:function(){resolve(null);}
+      });
     });
-  }):Promise.resolve(null))
+  })
   .then(dataUrl=>{
     _coverPending[fileId]=false;
-    if(dataUrl){
-      _coverCache[fileId]=dataUrl;
-      _applycover(fileId,dataUrl);
-    } else {
-      // NO marcar como 'none' permanentemente — puede reintentarse en próxima sesión
-      _coverCache[fileId]='none';
-    }
+    if(dataUrl){_coverCache[fileId]=dataUrl;_applycover(fileId,dataUrl);}
+    else{_coverCache[fileId]='none';}
   })
   .catch(()=>{_coverPending[fileId]=false;_coverCache[fileId]='none';});
 }
@@ -4173,20 +4208,30 @@ function _initCoverObserver(){
         const fileId=el.dataset.fid;
         const accountKey=el.dataset.ak||null;
         if(fileId){
-          if(!_coverCache[fileId] || _coverCache[fileId]==='none'){
-            // Reintentar aunque estuviera marcado como 'none' (límite anterior era 128KB)
-            delete _coverCache[fileId];
-            delete _coverPending[fileId];
+          if(!_coverCache[fileId]){
+            // Primera vez — intentar descargar carátula
             _loadID3Cover(fileId,accountKey);
+          } else if(_coverCache[fileId]==='none'){
+            // Sin carátula confirmado — no re-descargar (evita tráfico excesivo con miles de canciones)
+            // Solo reintentar si el song ya no tiene cover marcado (puede cambiar entre sesiones)
+            const s=songs.find(x=>x.fileId===fileId);
+            if(s&&s.coverUrl){
+              // La BD tiene cover aunque el cache diga 'none' — actualizar cache y aplicar
+              _coverCache[fileId]=s.coverUrl;
+              _applycover(fileId,s.coverUrl);
+            }
+            // Si no hay cover en BD tampoco, no reintentamos esta sesión
           } else {
+            // Tenemos carátula en cache — aplicarla directamente
             _applycover(fileId,_coverCache[fileId]);
           }
         }
         _coverObserver.unobserve(el);
       }
     });
-  },{rootMargin:'400px',threshold:0});
-  document.querySelectorAll('[data-fid]').forEach(el=>{if(el.dataset.fid)_coverObserver.observe(el);});
+  },{rootMargin:'300px',threshold:0});
+  // Solo observar elementos con data-fid no vacío
+  document.querySelectorAll('[data-fid]').forEach(el=>{if(el.dataset.fid) _coverObserver.observe(el);});
 }
 
 const _origRenderAll=window.renderAll;
