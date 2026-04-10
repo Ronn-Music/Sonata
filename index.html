@@ -2088,8 +2088,7 @@ async function initApp(){
     ?'<img src="'+currentUser.avatar+'" style="width:100%;height:100%;object-fit:cover;border-radius:50%">'
     :currentUser.name.charAt(0).toUpperCase();
   document.getElementById('homeGreeting').textContent='Hola, '+currentUser.name.split(' ')[0]+' 👋';
-  const sli=document.getElementById('sidebarLogoImg');
-  sli.src=LOGO_B64; sli.onerror=()=>sli.style.display='none';
+  // sidebarLogoImg is now an SVG div — no src needed
 
   toast('⏳ Conectando...');
 
