@@ -4000,6 +4000,9 @@ function _navToStackIdx(idx){
 const _coverCache = {};
 const _coverPending = {};
 let _coverObserver = null;
+let _coverQueue = [];      // cola de fileIds pendientes
+let _coverRunning = 0;     // peticiones activas simultáneas
+const _COVER_CONCURRENCY = 3; // máximo 3 descargas a la vez
 
 function _getToken(accountKey){
   return connectedClouds['_tok_'+(accountKey||'')]
@@ -4034,30 +4037,47 @@ function _applycover(fileId, dataUrl){
   }
 }
 
+function _coverQueueTick(){
+  while(_coverRunning < _COVER_CONCURRENCY && _coverQueue.length > 0){
+    const {fileId, accountKey} = _coverQueue.shift();
+    _coverRunning++;
+    _fetchCover(fileId, accountKey).finally(()=>{
+      _coverRunning--;
+      _coverQueueTick();
+    });
+  }
+}
+
 function _loadID3Cover(fileId, accountKey){
   if(!fileId) return;
-  if(_coverCache[fileId]){if(_coverCache[fileId]!=='none')_applycover(fileId,_coverCache[fileId]);return;}
+  if(_coverCache[fileId]){
+    if(_coverCache[fileId]!=='none') _applycover(fileId,_coverCache[fileId]);
+    return;
+  }
   if(_coverPending[fileId]) return;
   _coverPending[fileId]=true;
-  // Buscar token fresco en memoria (puede haber sido renovado)
+  _coverQueue.push({fileId, accountKey});
+  _coverQueueTick();
+}
+
+function _fetchCover(fileId, accountKey){
   const token=connectedClouds['_tok_'+(accountKey||'')]
     ||connectedClouds['_tok_gdrive']
     ||Object.keys(connectedClouds).filter(k=>k.startsWith('_tok_')&&k!=='_tok_gdrive'&&connectedClouds[k]).map(k=>connectedClouds[k])[0]
     ||null;
-  if(!token){delete _coverPending[fileId];return;}
+  if(!token){_coverPending[fileId]=false;return Promise.resolve();}
   const url='https://www.googleapis.com/drive/v3/files/'+fileId+'?alt=media';
-  fetch(url,{headers:{Authorization:'Bearer '+token,Range:'bytes=0-131072'}})
+  // 512KB — suficiente para cubrir tags ID3 al inicio Y carátulas grandes
+  return fetch(url,{headers:{Authorization:'Bearer '+token,Range:'bytes=0-524287'}})
   .then(r=>{
     if(r.status===401||r.status===403){
-      // Token inválido — limpiar pending para que se reintente cuando el token se renueve
       _coverPending[fileId]=false;
-      // No marcar como 'none' — el token puede renovarse y reintentarse
       return null;
     }
     if(!r.ok) throw new Error('HTTP '+r.status);
     return r.blob();
   })
-  .then(blob=>blob?new Promise((resolve,reject)=>{
+  .then(blob=>blob?new Promise((resolve)=>{
     jsmediatags.read(blob,{
       onSuccess:function(tag){
         const pic=tag.tags&&tag.tags.picture;
@@ -4071,10 +4091,14 @@ function _loadID3Cover(fileId, accountKey){
     });
   }):Promise.resolve(null))
   .then(dataUrl=>{
-    if(dataUrl===undefined||(_coverPending[fileId]===false&&dataUrl===null)) return; // fue anulado por 403
     _coverPending[fileId]=false;
-    if(dataUrl){_coverCache[fileId]=dataUrl;_applycover(fileId,dataUrl);}
-    else _coverCache[fileId]='none';
+    if(dataUrl){
+      _coverCache[fileId]=dataUrl;
+      _applycover(fileId,dataUrl);
+    } else {
+      // NO marcar como 'none' permanentemente — puede reintentarse en próxima sesión
+      _coverCache[fileId]='none';
+    }
   })
   .catch(()=>{_coverPending[fileId]=false;_coverCache[fileId]='none';});
 }
@@ -4087,12 +4111,20 @@ function _initCoverObserver(){
         const el=entry.target;
         const fileId=el.dataset.fid;
         const accountKey=el.dataset.ak||null;
-        if(fileId&&!_coverCache[fileId]) _loadID3Cover(fileId,accountKey);
-        else if(fileId&&_coverCache[fileId]&&_coverCache[fileId]!=='none') _applycover(fileId,_coverCache[fileId]);
+        if(fileId){
+          if(!_coverCache[fileId] || _coverCache[fileId]==='none'){
+            // Reintentar aunque estuviera marcado como 'none' (límite anterior era 128KB)
+            delete _coverCache[fileId];
+            delete _coverPending[fileId];
+            _loadID3Cover(fileId,accountKey);
+          } else {
+            _applycover(fileId,_coverCache[fileId]);
+          }
+        }
         _coverObserver.unobserve(el);
       }
     });
-  },{rootMargin:'200px',threshold:0});
+  },{rootMargin:'400px',threshold:0});
   document.querySelectorAll('[data-fid]').forEach(el=>{if(el.dataset.fid)_coverObserver.observe(el);});
 }
 
