@@ -2475,7 +2475,7 @@ async function loadClouds(){
 }
 
 // ── CACHÉ LOCAL: guarda/carga canciones en localStorage por usuario ──
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 3; // Bump para invalidar caché incompleto de 488 canciones
 function _cacheKey(){ return 'sonatta_songs_' + (currentUser ? currentUser.id : '') + '_v' + CACHE_VERSION; }
 function _cacheMetaKey(){ return 'sonatta_songs_meta_' + (currentUser ? currentUser.id : '') + '_v' + CACHE_VERSION; }
 
@@ -2669,6 +2669,7 @@ async function _loadSongsBackground(from, PAGE, countEl, textEl){
 
   // Todo cargado
   songs.sort((a,b)=>(a.title||'').localeCompare(b.title||''));
+  _saveCache(songs); // Guardar caché completo ahora que tenemos todas las canciones
   renderAllSongs(); renderAlbums(); renderArtists(); renderLiked(); updateStats();
   toast('\u2713 ' + songs.length + ' canciones listas');
 }
@@ -3289,7 +3290,7 @@ document.addEventListener('DOMContentLoaded',function(){
   const vf=document.getElementById('volFill'); if(vf) vf.style.width=(volume*100)+'%';
 });
 audioEl.addEventListener('ended',()=>{
-  if(isRepeat){ audioEl.currentTime=0; audioEl.play().catch(()=>{}); }
+  if(isRepeat){ audioEl.currentTime=0; audioEl.play().catch(e=>{ if(e.name!=='AbortError') console.warn('play error:',e.message); }); }
   else nextSong();
 });
 audioEl.addEventListener('timeupdate',()=>{
@@ -3343,8 +3344,9 @@ async function playSongById(id){
 
   currentSongIdx=idx; const song=songs[idx];
 
-  // Pausar audio actual inmediatamente para evitar "play() interrupted"
-  audioEl.pause();
+  // Pausar audio actual y esperar que se resuelva antes de continuar
+  try { audioEl.pause(); } catch(e) {}
+  audioEl.src = ''; // Limpiar src para evitar conflictos de estado
 
   // Update player bar UI
   document.getElementById('npTitle').textContent=song.title;
