@@ -2474,6 +2474,41 @@ async function loadClouds(){
   }
 }
 
+// ── CACHÉ LOCAL: guarda/carga canciones en localStorage por usuario ──
+const CACHE_VERSION = 2;
+function _cacheKey(){ return 'sonatta_songs_' + (currentUser ? currentUser.id : '') + '_v' + CACHE_VERSION; }
+function _cacheMetaKey(){ return 'sonatta_songs_meta_' + (currentUser ? currentUser.id : '') + '_v' + CACHE_VERSION; }
+
+function _saveCache(songsArr){
+  try {
+    const key = _cacheKey();
+    const meta = { ts: Date.now(), count: songsArr.length };
+    localStorage.setItem(key, JSON.stringify(songsArr));
+    localStorage.setItem(_cacheMetaKey(), JSON.stringify(meta));
+    console.log('Cache guardado: ' + songsArr.length + ' canciones');
+  } catch(e) {
+    // localStorage lleno o bloqueado — ignorar silenciosamente
+    console.warn('Cache no disponible:', e.message);
+  }
+}
+
+function _loadCache(){
+  try {
+    const raw = localStorage.getItem(_cacheKey());
+    if(!raw) return null;
+    const arr = JSON.parse(raw);
+    if(!Array.isArray(arr) || !arr.length) return null;
+    return arr;
+  } catch(e) { return null; }
+}
+
+function _clearCache(){
+  try {
+    localStorage.removeItem(_cacheKey());
+    localStorage.removeItem(_cacheMetaKey());
+  } catch(e) {}
+}
+
 // ── Consulta una página de canciones con retry automático si hay timeout ──
 async function _fetchSongsPage(from, size, attempt){
   attempt = attempt || 1;
@@ -2489,10 +2524,9 @@ async function _fetchSongsPage(from, size, attempt){
       error.message.includes('canceling') ||
       error.message.includes('statement')
     );
-    // Retry con lote más pequeño si hay timeout (hasta 3 intentos)
     if(isTimeout && attempt <= 3){
       const smallerSize = Math.max(50, Math.floor(size / 2));
-      console.warn('Timeout en lote ' + from + '-' + (from+size-1) + ', reintentando con lote de ' + smallerSize + ' (intento ' + attempt + ')');
+      console.warn('Timeout, reintentando con lote de ' + smallerSize + ' (intento ' + attempt + ')');
       await new Promise(r => setTimeout(r, 500 * attempt));
       return _fetchSongsPage(from, smallerSize, attempt + 1);
     }
@@ -2502,18 +2536,36 @@ async function _fetchSongsPage(from, size, attempt){
 }
 
 async function loadSongsFromDB(){
-  // SIN .order() en Supabase — evita statement timeout con miles de canciones.
-  // Ordenamiento se hace localmente en memoria al final.
-  let PAGE = 1000; // Lote grande — el índice en user_id evita timeout
+  let PAGE = 1000;
 
   const overlay = document.getElementById('loadingOverlay');
   const countEl = document.getElementById('loadingCount');
   const textEl  = document.getElementById('loadingText');
   if(overlay) overlay.classList.remove('hidden');
   if(countEl) countEl.textContent = '...';
-  if(textEl)  textEl.textContent  = 'Conectando a tu biblioteca...';
+  if(textEl)  textEl.textContent  = 'Cargando biblioteca...';
 
-  // --- Primera página ---
+  // ── PASO 1: cargar caché local instantáneamente ──
+  const cached = _loadCache();
+  if(cached){
+    songs = cached;
+    if(countEl) countEl.textContent = songs.length;
+    if(textEl)  textEl.textContent  = 'canciones (caché)';
+    console.log('Caché local: ' + songs.length + ' canciones');
+    // Mostrar UI inmediatamente con el caché
+    songs.sort((a,b)=>(a.title||'').localeCompare(b.title||''));
+    _hideLoadingOverlay();
+    renderAllSongs(); renderAlbums(); renderArtists(); renderLiked();
+    renderHomeSongs(); renderRecentGrid(); updateStats();
+    toast('⚡ ' + songs.length + ' canciones (caché) — sincronizando...');
+    if(window._activateTouchOnButtons) setTimeout(window._activateTouchOnButtons, 100);
+    // Sincronizar con Supabase en background sin bloquear la UI
+    _syncSongsBackground(PAGE, countEl);
+    return;
+  }
+
+  // ── PASO 2: sin caché — cargar primera página de Supabase ──
+  if(textEl) textEl.textContent = 'Conectando a tu biblioteca...';
   const r1 = await _fetchSongsPage(0, PAGE, 1);
 
   if(r1.error){
@@ -2526,12 +2578,8 @@ async function loadSongsFromDB(){
 
   if(!firstPage.length){
     _supabase.from('songs').select('id,user_id').limit(3).then(({data:td,error:te})=>{
-      if(te){ toast('\u274c Supabase SELECT error: '+te.message); console.error('SELECT test error:',te); }
-      else if(td&&td.length>0){
-        console.warn('PROBLEMA RLS: canciones en BD pero user_id no las devuelve. Falta política SELECT.');
-        toast('\u26a0 RLS: canciones en BD sin acceso. Ve a Supabase \u2192 songs \u2192 RLS \u2192 agrega SELECT policy');
-        _showRLSBanner();
-      }
+      if(te){ toast('\u274c Supabase SELECT error: '+te.message); }
+      else if(td&&td.length>0){ _showRLSBanner(); }
     });
     songs=[]; _hideLoadingOverlay(); _checkEmptyLibrary(); return;
   }
@@ -2539,18 +2587,14 @@ async function loadSongsFromDB(){
   songs = _dedupSongs(_mapSongs(firstPage));
   if(countEl) countEl.textContent = songs.length;
   if(textEl)  textEl.textContent  = 'canciones — cargando más...';
-  console.log('Songs page 1 loaded:', songs.length);
-
-  // Renderizar inmediatamente lo que tenemos
   renderHomeSongs(); renderRecentGrid(); updateStats();
 
-  // Si hay menos que PAGE ya terminamos
   if(firstPage.length < PAGE){
     songs.sort((a,b)=>(a.title||'').localeCompare(b.title||''));
     _hideLoadingOverlay();
-    await new Promise(r => setTimeout(r, 20));
     renderAllSongs(); renderAlbums(); renderArtists();
-    toast('✓ ' + songs.length + ' canciones listas');
+    _saveCache(songs);
+    toast('\u2713 ' + songs.length + ' canciones listas');
     if(window._activateTouchOnButtons) setTimeout(window._activateTouchOnButtons, 100);
     return;
   }
@@ -2559,48 +2603,74 @@ async function loadSongsFromDB(){
   _loadSongsBackground(firstPage.length, PAGE, countEl, textEl);
 }
 
-async function _loadSongsBackground(from, PAGE, countEl, textEl){
+// ── Sincronización en background cuando ya hay caché ──
+async function _syncSongsBackground(PAGE, countEl){
+  let allFromDB = [];
+  let from = 0;
   let consecutiveErrors = 0;
-
   while(true){
-    await new Promise(r => setTimeout(r, 50)); // Pausa mínima entre lotes
-
+    await new Promise(r => setTimeout(r, 80));
     const result = await _fetchSongsPage(from, PAGE, 1);
-
     if(result.error){
       consecutiveErrors++;
-      console.error('loadSongs bg err:', result.error.message, '(error #' + consecutiveErrors + ')');
-      if(consecutiveErrors >= 3) break; // Parar tras 3 errores seguidos
-      await new Promise(r => setTimeout(r, 1000 * consecutiveErrors));
+      if(consecutiveErrors >= 3) break;
+      await new Promise(r => setTimeout(r, 800 * consecutiveErrors));
       continue;
     }
-
     consecutiveErrors = 0;
     const data = result.data || [];
     if(!data.length) break;
-
-    songs = _dedupSongs(songs.concat(_mapSongs(data)));
-    from += data.length; // Avanzar según lo que realmente vino (puede ser menos si hubo retry con lote menor)
-    console.log('Songs total loaded:', songs.length);
+    allFromDB = allFromDB.concat(_mapSongs(data));
+    from += data.length;
+    if(data.length < PAGE) break;
+  }
+  if(allFromDB.length > 0){
+    songs = _dedupSongs(allFromDB);
+    songs.sort((a,b)=>(a.title||'').localeCompare(b.title||''));
+    _saveCache(songs);
+    renderAllSongs(); renderAlbums(); renderArtists(); renderLiked();
+    renderHomeSongs(); updateStats();
     if(countEl) countEl.textContent = songs.length;
-    if(textEl)  textEl.textContent  = 'canciones — cargando más...';
-    updateStats(); renderHomeSongs();
+    console.log('Sync completo: ' + songs.length + ' canciones');
+    toast('\u2713 Biblioteca actualizada: ' + songs.length + ' canciones');
+  }
+}
 
+
+async function _loadSongsBackground(from, PAGE, countEl, textEl){
+  // Mostrar UI inmediatamente con lo que ya tenemos
+  songs.sort((a,b)=>(a.title||'').localeCompare(b.title||''));
+  _hideLoadingOverlay();
+  renderAllSongs(); renderAlbums(); renderArtists(); renderLiked();
+  updateStats();
+  toast('\u23f3 ' + songs.length + ' canciones listas, cargando resto...');
+  if(window._activateTouchOnButtons) setTimeout(window._activateTouchOnButtons, 100);
+
+  // Seguir cargando en background sin bloquear la UI
+  let consecutiveErrors = 0;
+  while(true){
+    await new Promise(r => setTimeout(r, 30));
+    const result = await _fetchSongsPage(from, PAGE, 1);
+    if(result.error){
+      consecutiveErrors++;
+      if(consecutiveErrors >= 3) break;
+      await new Promise(r => setTimeout(r, 800 * consecutiveErrors));
+      continue;
+    }
+    consecutiveErrors = 0;
+    const data = result.data || [];
+    if(!data.length) break;
+    songs = _dedupSongs(songs.concat(_mapSongs(data)));
+    from += data.length;
+    if(countEl) countEl.textContent = songs.length;
+    updateStats();
     if(data.length < PAGE) break;
   }
 
-  // Finalizar: ordenar localmente y renderizar todo
+  // Todo cargado
   songs.sort((a,b)=>(a.title||'').localeCompare(b.title||''));
-  _hideLoadingOverlay();
-  await new Promise(r => setTimeout(r, 30));
-  renderAllSongs();
-  renderAlbums(); renderArtists(); renderLiked();
-  updateStats();
-  const msg = songs.length > 0
-    ? '✓ ' + songs.length + ' canciones listas'
-    : '⚠ No se pudieron cargar canciones — intenta recargar';
-  toast(msg);
-  if(window._activateTouchOnButtons) setTimeout(window._activateTouchOnButtons, 100);
+  renderAllSongs(); renderAlbums(); renderArtists(); renderLiked(); updateStats();
+  toast('\u2713 ' + songs.length + ' canciones listas');
 }
 
 function _hideLoadingOverlay(){
@@ -4072,6 +4142,7 @@ async function saveGDriveToken(accessToken, expiresIn, refreshToken=null){
 // and query MusicBrainz API to get cover art. This runs async after scan.
 async function scanGDrive(token, accountKey, deleteFirst=true){
   toast('⏳ Escaneando Google Drive...');
+  _clearCache(); // Limpiar caché para forzar recarga después del scan
   try {
     // ── PASO 1: Escanear todos los archivos de audio con su parent ──
     let allFiles=[],pageToken=null,pagina=1;
