@@ -2218,6 +2218,7 @@ let currentSongIdx=-1, isPlaying=false, isShuffle=false, isRepeat=false;
 let isMuted=false, volume=0.8, progress=0, progInterval=null, songDuration=200;
 let pendingCloud=null, songsViewMode='list';
 let _ddActiveSongId=null;
+const _coverCache = {}; // declarado aquí para que _mapSongs pueda usarlo
 let _oauthPopup=null, _oauthInterval=null;
 const GOOGLE_CLIENT_ID='980361737078-vk91pdvckri8pemueg44tlmebbu1shfo.apps.googleusercontent.com';
 const GOOGLE_REDIRECT='https://sonatta-yrlr.vercel.app';
@@ -4232,7 +4233,6 @@ function _navToStackIdx(idx){
 
 
 // ══ ID3 COVER ART SYSTEM ══
-const _coverCache = {};
 const _coverPending = {};
 let _coverObserver = null;
 let _coverQueue = [];      // cola de fileIds pendientes
