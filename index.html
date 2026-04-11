@@ -2475,7 +2475,8 @@ async function loadClouds(){
 }
 
 async function loadSongsFromDB(){
-  const PAGE = 1000;
+  // Usar lotes más pequeños para evitar statement timeout en Supabase
+  const PAGE = 500;
 
   // Mostrar overlay de carga
   const overlay = document.getElementById('loadingOverlay');
@@ -2487,10 +2488,12 @@ async function loadSongsFromDB(){
   if(countEl) countEl.textContent = '...';
   if(textEl)  textEl.textContent  = 'Conectando a tu biblioteca...';
 
+  // NOTA: Se eliminó .order() de las consultas a Supabase para evitar
+  // "statement timeout" que ocurre al ordenar miles de canciones en el servidor.
+  // El ordenamiento se realiza localmente en memoria después de cargar.
   const {data: firstPage, error: e1} = await _supabase.from('songs')
     .select('id,title,artist,album,duration,file_path,file_url,cloud_provider,account_key,cover_url,liked,folder_path,folder_id')
     .eq('user_id', currentUser.id)
-    .order('title', {ascending: true})
     .range(0, PAGE - 1);
 
   if(e1){
@@ -2516,8 +2519,9 @@ async function loadSongsFromDB(){
   if(textEl)  textEl.textContent  = 'canciones cargadas';
   console.log('Songs loaded:', songs.length);
 
-  // Si hay menos de PAGE canciones ya terminamos — ocultar overlay y renderizar
+  // Si hay menos de PAGE canciones ya terminamos — ordenar y renderizar
   if(firstPage.length < PAGE){
+    songs.sort((a,b)=>(a.title||'').localeCompare(b.title||''));
     _hideLoadingOverlay();
     renderHomeSongs(); renderRecentGrid(); updateStats();
     await new Promise(r => setTimeout(r, 20));
@@ -2534,12 +2538,11 @@ async function loadSongsFromDB(){
 
 async function _loadSongsBackground(from, PAGE, countEl, textEl){
   while(true){
-    await new Promise(r => setTimeout(r, 80));
+    await new Promise(r => setTimeout(r, 120));
 
     const {data, error} = await _supabase.from('songs')
       .select('id,title,artist,album,duration,file_path,file_url,cloud_provider,account_key,cover_url,liked,folder_path,folder_id')
       .eq('user_id', currentUser.id)
-      .order('title', {ascending: true})
       .range(from, from + PAGE - 1);
 
     if(error){ console.error('loadSongs bg err:', error.message); break; }
@@ -2554,7 +2557,8 @@ async function _loadSongsBackground(from, PAGE, countEl, textEl){
     if(data.length < PAGE) break;
   }
 
-  // Todas las canciones cargadas — ocultar overlay y renderizar todo
+  // Todas las canciones cargadas — ordenar localmente y renderizar todo
+  songs.sort((a,b)=>(a.title||'').localeCompare(b.title||''));
   _hideLoadingOverlay();
   await new Promise(r => setTimeout(r, 30));
   renderAllSongs();
