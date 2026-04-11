@@ -2568,11 +2568,18 @@ async function loadSongsFromDB(){
   const overlay = document.getElementById('loadingOverlay');
   const countEl = document.getElementById('loadingCount');
   const textEl  = document.getElementById('loadingText');
-  if(overlay) overlay.classList.remove('hidden');
+  if(overlay){ overlay.style.display='flex'; overlay.classList.remove('hidden'); }
+
+  // Timeout de seguridad: si en 12 segundos no cargó nada, ocultar overlay igual
+  const _safetyTimer = setTimeout(()=>{
+    _hideLoadingOverlay();
+    if(!songs.length) toast('⚠ No se pudieron cargar canciones — recarga la página');
+  }, 12000);
 
   // ── PASO 1: mostrar caché inmediatamente si existe ──
   const cached = _loadCache();
   if(cached){
+    clearTimeout(_safetyTimer);
     songs = cached;
     songs.sort((a,b)=>(a.title||'').localeCompare(b.title||''));
     if(countEl) countEl.textContent = songs.length;
@@ -2607,6 +2614,7 @@ async function loadSongsFromDB(){
   // Primera página rápida para mostrar algo pronto
   const r1 = await _fetchSongsPage(0, PAGE, 1);
   if(r1.error){
+    clearTimeout(_safetyTimer);
     toast('❌ Error: ' + r1.error.message);
     songs=[]; _hideLoadingOverlay(); _checkEmptyLibrary(); return;
   }
@@ -2615,6 +2623,7 @@ async function loadSongsFromDB(){
     _supabase.from('songs').select('id,user_id').limit(3).then(({data:td,error:te})=>{
       if(!te && td && td.length > 0) _showRLSBanner();
     });
+    clearTimeout(_safetyTimer);
     songs=[]; _hideLoadingOverlay(); _checkEmptyLibrary(); return;
   }
 
@@ -2622,6 +2631,7 @@ async function loadSongsFromDB(){
   if(countEl) countEl.textContent = songs.length;
   if(textEl)  textEl.textContent  = 'canciones — cargando más...';
   songs.sort((a,b)=>(a.title||'').localeCompare(b.title||''));
+  clearTimeout(_safetyTimer);
   _hideLoadingOverlay();
   renderAllSongs(); renderAlbums(); renderArtists();
   renderHomeSongs(); renderRecentGrid(); updateStats();
