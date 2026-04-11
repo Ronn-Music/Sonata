@@ -2417,7 +2417,7 @@ async function initApp(){
 async function loadClouds(){
   connectedClouds={};
   const{data}=await _supabase.from('cloud_connections')
-    .select('id,provider,account_key,access_token,token_expires_at,connected_at')
+    .select('id,provider,account_key,account_label,access_token,token_expires_at,connected_at')
     .eq('user_id',currentUser.id);
   if(data){
     const accountsList=[];
@@ -2586,8 +2586,25 @@ async function _rescanAllClouds(){
   if(!accounts.length){ toast('⚠ No hay cuentas activas de Google Drive'); return; }
   toast('⏳ Iniciando escaneo...');
   for(const acc of accounts){
-    const tok = connectedClouds['_tok_'+acc.account_key] || connectedClouds['_tok_gdrive'];
-    if(!tok){ toast('⚠ Sin token para '+acc.account_label+' — reconecta'); continue; }
+    // Intentar obtener token de memoria primero, luego de la BD
+    let tok = connectedClouds['_tok_'+acc.account_key] || connectedClouds['_tok_gdrive'];
+    if(!tok){
+      // Fallback: leer token fresco desde la BD
+      const{data:cd}=await _supabase.from('cloud_connections')
+        .select('access_token').eq('user_id',currentUser.id).eq('provider','gdrive').limit(1);
+      const row=cd&&cd[0];
+      if(row){
+        try{
+          const p=JSON.parse(row.access_token);
+          if(p&&p._multiAccount&&Array.isArray(p.accounts)){
+            const found=p.accounts.find(a=>a.key===acc.account_key);
+            if(found) tok=found.token;
+          }
+        }catch(e){}
+        if(!tok&&row.access_token&&!row.access_token.startsWith('{')) tok=row.access_token;
+      }
+    }
+    if(!tok){ toast('⚠ Sin token para '+(acc.account_label||acc.account_key)+' — reconecta'); continue; }
     await scanGDrive(tok, acc.account_key, false);
   }
   await loadSongsFromDB();
@@ -3008,9 +3025,9 @@ function renderClouds(){
           +'<div class="cloud-stat-item" style="font-size:.75rem">'+c.desc+'</div></div>'
           +(acc.expired
             ?'<button class="btn-connect" onclick="startConnect(\''+c.id+'\')">Reconectar</button>'
-            +'<button class="btn-disconnect" style="margin-top:7px" onclick="disconnectCloud(\''+c.id+'\')">✕ Desconectar</button>'
-            :'<button class="btn-sync" onclick="syncCloud(\''+c.id+'\')">↻ Sincronizar</button>'
-              +'<button class="btn-disconnect" style="margin-top:7px" onclick="disconnectCloud(\''+c.id+'\')">✕ Desconectar</button>')          +'</div>';
+            +'<button class="btn-disconnect" style="margin-top:7px" onclick="disconnectCloud(\''+c.id+'\',\''+acc.account_key+'\')">✕ Desconectar</button>'
+            :'<button class="btn-sync" onclick="syncCloud(\''+c.id+'\',\''+acc.account_key+'\')">↻ Sincronizar</button>'
+              +'<button class="btn-disconnect" style="margin-top:7px" onclick="disconnectCloud(\''+c.id+'\',\''+acc.account_key+'\')">✕ Desconectar</button>')          +'</div>';
       });
       if(c.id==='gdrive'){
         html+='<div class="cloud-card" style="border-style:dashed;display:flex;align-items:center;justify-content:center;gap:10px;cursor:pointer;min-height:80px;color:var(--accent2)" onclick="startConnect(\'gdrive\')">'
@@ -4031,9 +4048,14 @@ async function scanGDrive(token, accountKey, deleteFirst=true){
 
     // ── PASO 4: Borrar y guardar canciones con folder_path ──
     toast('⏳ '+allFiles.length+' canciones — guardando...');
-    if(deleteFirst && accountKey){
-      await _supabase.from('songs').delete()
+
+    // FIX: Siempre borrar canciones de la cuenta específica antes de insertar.
+    // Esto evita depender de un constraint único (user_id,file_path) en Supabase que
+    // podría no existir y causaría que upsert falle silenciosamente guardando 0 canciones.
+    if(accountKey){
+      const{error:delErr}=await _supabase.from('songs').delete()
         .eq('user_id',currentUser.id).eq('cloud_provider','gdrive').eq('account_key',accountKey);
+      if(delErr) console.warn('Error borrando canciones previas:',delErr.message);
     } else if(deleteFirst){
       await _supabase.from('songs').delete()
         .eq('user_id',currentUser.id).eq('cloud_provider','gdrive');
@@ -4066,8 +4088,13 @@ async function scanGDrive(token, accountKey, deleteFirst=true){
           folder_id:parentId||null
         };
       });
-      const{error}=await _supabase.from('songs').upsert(rows,{onConflict:'user_id,file_path',ignoreDuplicates:false});
-      if(error) console.error('Lote '+i+':',error.message); else saved+=lote.length;
+      // FIX: usar insert en lugar de upsert para no depender del constraint único en BD
+      const{error}=await _supabase.from('songs').insert(rows);
+      if(error){
+        console.error('Lote '+i+':',error.message);
+        toast('⚠ Error guardando canciones: '+error.message);
+        break;
+      } else { saved+=lote.length; }
       if(i%(BATCH*5)===0&&i>0) toast('⏳ '+saved+'/'+allFiles.length+'...');
     }
     toast('✓ '+saved+' canciones guardadas');
