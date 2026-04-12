@@ -3475,82 +3475,28 @@ async function playSongById(id){
     return {mp3:'audio/mpeg',flac:'audio/flac',wav:'audio/wav',ogg:'audio/ogg',m4a:'audio/mp4',mp4:'audio/mp4'}[ext]||'audio/mpeg';
   }
 
-  // ── Función central: recibe una respuesta OK y la reproduce via streaming ──
+  // ── Función central: recibe respuesta y reproduce via blob ──
+  // Blob es más simple y compatible con todos los formatos sin depender de extensión
   async function _streamResponse(res){
     if(myRequestId !== _playRequestId) return;
     if(audioEl._blobUrl){ URL.revokeObjectURL(audioEl._blobUrl); audioEl._blobUrl=null; }
     if(audioEl._ms){ try{audioEl._ms.endOfStream();}catch(e){} audioEl._ms=null; }
 
-    const mimeType = _mimeFromPath(song.filePath||song.fileUrl||'');
-    const msSupported = window.MediaSource && MediaSource.isTypeSupported(mimeType);
-
-    if(msSupported){
-      const ms = new MediaSource();
-      audioEl._ms = ms;
-      const msUrl = URL.createObjectURL(ms);
-      audioEl.src = msUrl;
-
-      await new Promise((resolve)=>{
-        ms.addEventListener('sourceopen', async ()=>{
-          URL.revokeObjectURL(msUrl);
-          let sb;
-          try { sb = ms.addSourceBuffer(mimeType); }
-          catch(e){ try{ms.endOfStream();}catch(e2){} resolve('fallback'); return; }
-
-          toast('▶ '+song.title+' — '+song.artist);
-          try {
-            await audioEl.play();
-            if(myRequestId!==_playRequestId){ audioEl.pause(); resolve('abort'); return; }
-            isPlaying=true; updatePlayBtn(); syncNpModal();
-          } catch(pe){
-            if(pe.name==='NotAllowedError'){ isPlaying=false; updatePlayBtn(); toast('Toca ▶ para reproducir'); }
-            else if(pe.name!=='AbortError'){ toast('Error al reproducir: '+pe.message); isPlaying=false; updatePlayBtn(); }
-          }
-
-          const reader = res.body.getReader();
-          const pump = async ()=>{
-            while(true){
-              if(myRequestId!==_playRequestId){ reader.cancel(); try{ms.endOfStream();}catch(e){} resolve('abort'); return; }
-              let chunk;
-              try{ chunk = await reader.read(); }
-              catch(e){ try{ms.endOfStream();}catch(e2){} resolve('done'); return; }
-              if(chunk.done){
-                const waitReady=()=>{ if(sb.updating){setTimeout(waitReady,50);return;} try{ms.endOfStream();}catch(e){} resolve('done'); };
-                waitReady(); return;
-              }
-              if(sb.updating) await new Promise(r=>sb.addEventListener('updateend',r,{once:true}));
-              if(myRequestId!==_playRequestId){ reader.cancel(); try{ms.endOfStream();}catch(e){} resolve('abort'); return; }
-              if(ms.readyState!=='open'){ resolve('done'); return; }
-              try{ sb.appendBuffer(chunk.value); }
-              catch(e){
-                if(e.name==='QuotaExceededError'){
-                  await new Promise(r=>setTimeout(r,300));
-                  if(sb.updating) await new Promise(r=>sb.addEventListener('updateend',r,{once:true}));
-                  try{ sb.appendBuffer(chunk.value); }catch(e2){}
-                }
-              }
-            }
-          };
-          pump();
-        }, {once:true});
-      });
-    } else {
-      // Fallback blob (FLAC/OGG sin soporte MediaSource)
-      const blob = await res.blob();
-      if(myRequestId !== _playRequestId) return;
-      audioEl._blobUrl = URL.createObjectURL(blob);
-      audioEl.src = audioEl._blobUrl;
-      audioEl.load();
-      toast('▶ '+song.title+' — '+song.artist);
-      try {
-        await audioEl.play();
-        if(myRequestId !== _playRequestId){ audioEl.pause(); return; }
-        isPlaying=true; updatePlayBtn(); syncNpModal();
-      } catch(playErr){
-        if(playErr.name==='NotAllowedError'){ isPlaying=false; updatePlayBtn(); toast('Toca ▶ para reproducir'); }
-        else if(playErr.name==='AbortError'){ console.log('play() aborted'); }
-        else { console.error('play() failed:',playErr); toast('Error al reproducir: '+playErr.message); isPlaying=false; updatePlayBtn(); }
-      }
+    toast('⏳ '+song.title+' — cargando...');
+    const blob = await res.blob();
+    if(myRequestId !== _playRequestId) return;
+    audioEl._blobUrl = URL.createObjectURL(blob);
+    audioEl.src = audioEl._blobUrl;
+    audioEl.load();
+    toast('▶ '+song.title+' — '+song.artist);
+    try {
+      await audioEl.play();
+      if(myRequestId !== _playRequestId){ audioEl.pause(); return; }
+      isPlaying=true; updatePlayBtn(); syncNpModal();
+    } catch(playErr){
+      if(playErr.name==='NotAllowedError'){ isPlaying=false; updatePlayBtn(); toast('Toca ▶ para reproducir'); }
+      else if(playErr.name==='AbortError'){ console.log('play() aborted'); }
+      else { console.error('play() failed:',playErr); toast('Error al reproducir: '+playErr.message); isPlaying=false; updatePlayBtn(); }
     }
   }
 
@@ -4188,12 +4134,10 @@ async function scanGDrive(token, accountKey, deleteFirst=true){
       return parentPath ? parentPath+'/'+folder.name : folder.name;
     }
 
-    // ── PASO 4: Guardar con upsert — NUNCA borra canciones de otras cuentas ──
-    // El constraint único (user_id, file_path) garantiza que upsert actualiza
-    // si ya existe y solo inserta si es nueva. Cada cuenta tiene su propio file_path
-    // porque incluye el accountKey como prefijo, así nunca se mezclan.
+    // ── PASO 4: Borrar y guardar canciones con folder_path ──
     toast('⏳ '+allFiles.length+' canciones — guardando...');
 
+    // UPSERT — nunca borra canciones. Cada cuenta tiene prefijo único en file_path.
     let saved=0; const BATCH=100;
     for(let i=0;i<allFiles.length;i+=BATCH){
       const lote=allFiles.slice(i,i+BATCH);
@@ -4206,6 +4150,7 @@ async function scanGDrive(token, accountKey, deleteFirst=true){
         if(partes.length>=3){ album=partes[1].trim(); }
         const parentId=file.parents?file.parents[0]:null;
         const folderPath=getFolderPath(parentId);
+        // Intentar obtener duración desde metadata de Drive (disponible para algunos formatos)
         const driveDurMs=file.videoMediaMetadata&&file.videoMediaMetadata.durationMillis
           ?parseInt(file.videoMediaMetadata.durationMillis):0;
         const driveDurSec=driveDurMs>0?Math.floor(driveDurMs/1000):0;
@@ -4220,8 +4165,7 @@ async function scanGDrive(token, accountKey, deleteFirst=true){
           folder_id:parentId||null
         };
       });
-      // upsert con constraint único — actualiza si existe, inserta si es nueva
-      // NUNCA borra canciones de otras cuentas porque cada cuenta tiene prefijo distinto en file_path
+      // upsert: actualiza si existe, inserta si es nueva. Nunca borra otras cuentas.
       const{error}=await _supabase.from('songs')
         .upsert(rows,{onConflict:'user_id,file_path',ignoreDuplicates:false});
       if(error){
@@ -4253,6 +4197,7 @@ async function scanGDrive(token, accountKey, deleteFirst=true){
 
 async function syncCloud(id, accountKey){
   if(id==='gdrive'){
+    // Load all accounts from multi-account JSON
     const{data:rows}=await _supabase.from('cloud_connections')
       .select('*').eq('user_id',currentUser.id).eq('provider','gdrive').limit(1);
     const row=rows&&rows[0];
@@ -4260,22 +4205,17 @@ async function syncCloud(id, accountKey){
     let accounts=[];
     try{const p=JSON.parse(row.access_token);if(p&&p._multiAccount&&Array.isArray(p.accounts))accounts=p.accounts;}catch(e){}
     if(!accounts.length) accounts=[{key:row.account_key||'gdrive',label:row.account_label,token:row.access_token,expires:row.token_expires_at}];
+    // Filter to specific account if requested
     const toSync=accountKey?accounts.filter(a=>a.key===accountKey):accounts;
     if(!toSync.length){toast('⚠ Cuenta no encontrada');return;}
     for(const acc of toSync){
-      // Auto-renovar token antes de sincronizar — nunca pedir reconexión manual
       let tok = connectedClouds['_tok_'+acc.key] || acc.token;
       if(!tok || (acc.expires && new Date(acc.expires)<new Date())){
         toast('⏳ Renovando token para '+(acc.label||acc.key)+'...');
         const refreshed = await autoRefreshToken(acc.key, acc.label||acc.key);
-        if(refreshed){
-          tok = connectedClouds['_tok_'+acc.key] || acc.token;
-        } else {
-          toast('⚠ No se pudo renovar token para '+(acc.label||acc.key)+' — omitiendo');
-          continue;
-        }
+        if(refreshed){ tok = connectedClouds['_tok_'+acc.key] || acc.token; }
+        else { toast('⚠ No se pudo renovar token para '+(acc.label||acc.key)); continue; }
       }
-      // false = NO borrar canciones — upsert maneja todo
       await scanGDrive(tok, acc.key, false);
     }
     await loadClouds(); await loadSongsFromDB(); updateStats(); renderAll();
