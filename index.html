@@ -3892,8 +3892,6 @@ async function updateGDriveTokenOnly(accountKey,newToken,expiresIn){
     }).eq('id',row.id);
     scheduleTokenRefresh(accountKey,accountKey.replace(/^gdrive:/,''),exp);
     console.log('\u2705 Token silently refreshed for',accountKey);
-    // Limpiar entradas 'none' del coverCache para que reintenten con el token nuevo
-    Object.keys(_coverCache).forEach(k=>{ if(_coverCache[k]==='none') delete _coverCache[k]; });
     return true;
   }catch(e){console.error('updateGDriveTokenOnly:',e);return false;}
 }
@@ -4180,7 +4178,8 @@ async function scanGDrive(token, accountKey, deleteFirst=true){
   try {
     // ── PASO 1: Escanear todos los archivos de audio con su parent ──
     let allFiles=[],pageToken=null,pagina=1;
-    // 'me' in owners filtra solo archivos propios — excluye archivos compartidos por otros
+
+    // Scan 1A: archivos con MIME type de audio explícito
     const tipos="(mimeType='audio/mpeg' or mimeType='audio/mp3' or mimeType='audio/flac' or mimeType='audio/wav' or mimeType='audio/x-wav' or mimeType='audio/ogg' or mimeType='audio/x-m4a' or mimeType='audio/mp4' or mimeType='audio/aac' or mimeType='audio/x-aac' or mimeType='audio/wma' or mimeType='audio/x-ms-wma' or mimeType='audio/opus') and trashed=false";
     do {
       let url='https://www.googleapis.com/drive/v3/files'
@@ -4188,15 +4187,36 @@ async function scanGDrive(token, accountKey, deleteFirst=true){
         +'&fields='+encodeURIComponent('nextPageToken,files(id,name,mimeType,parents,videoMediaMetadata)')
         +'&pageSize=1000';
       if(pageToken) url+='&pageToken='+encodeURIComponent(pageToken);
-      toast('⏳ Escaneando pág '+pagina+'...');
+      toast('\u23f3 Escaneando p\u00e1g '+pagina+'...');
       const res=await fetch(url,{headers:{Authorization:'Bearer '+token}});
       const data=await res.json();
-      if(data.error){toast('⚠ Error Drive: '+data.error.message);return;}
+      if(data.error){toast('\u26a0 Error Drive: '+data.error.message);return;}
       if(data.files&&data.files.length) allFiles=allFiles.concat(data.files);
       pageToken=data.nextPageToken||null; pagina++;
     } while(pageToken);
 
-    if(!allFiles.length){toast('⚠ No se encontraron archivos de música');return;}
+    // Scan 1B: archivos con tipo genérico pero extensión de audio
+    // (Drive a veces no detecta el MIME type correctamente)
+    const tiposExt="mimeType='application/octet-stream' and (name contains '.mp3' or name contains '.flac' or name contains '.m4a' or name contains '.wav' or name contains '.ogg' or name contains '.aac' or name contains '.wma' or name contains '.opus' or name contains '.MP3' or name contains '.FLAC' or name contains '.M4A') and trashed=false";
+    let pageToken2=null, pagina2=1;
+    do {
+      let url2='https://www.googleapis.com/drive/v3/files'
+        +'?q='+encodeURIComponent(tiposExt)
+        +'&fields='+encodeURIComponent('nextPageToken,files(id,name,mimeType,parents,videoMediaMetadata)')
+        +'&pageSize=1000';
+      if(pageToken2) url2+='&pageToken='+encodeURIComponent(pageToken2);
+      toast('\u23f3 Buscando archivos extra p\u00e1g '+pagina2+'...');
+      const res2=await fetch(url2,{headers:{Authorization:'Bearer '+token}});
+      const data2=await res2.json();
+      if(!data2.error && data2.files && data2.files.length){
+        const existingIds=new Set(allFiles.map(f=>f.id));
+        const nuevos=data2.files.filter(f=>!existingIds.has(f.id));
+        allFiles=allFiles.concat(nuevos);
+      }
+      pageToken2=(data2.nextPageToken)||null; pagina2++;
+    } while(pageToken2);
+
+    if(!allFiles.length){toast('\u26a0 No se encontraron archivos de m\u00fasica');return;}
 
     // ── PASO 2: Escanear todas las carpetas para construir el árbol ──
     toast('⏳ Escaneando carpetas...');
@@ -4694,12 +4714,69 @@ function _fetchCover(fileId, accountKey){
       });
     });
   })
-  .then(dataUrl=>{
+  .then(async dataUrl=>{
     _coverPending[fileId]=false;
-    if(dataUrl){_coverCache[fileId]=dataUrl;_applycover(fileId,dataUrl);}
-    else{_coverCache[fileId]='none';}
+    if(dataUrl){
+      _coverCache[fileId]=dataUrl;
+      _applycover(fileId,dataUrl);
+      // Guardar en BD para no re-descargar la próxima sesión
+      const s=songs.find(x=>x.fileId===fileId);
+      if(s&&currentUser) _supabase.from('songs').update({cover_url:dataUrl}).eq('id',s.id).then(()=>{});
+    } else {
+      // Fallback: buscar carátula en iTunes por artista + álbum (gratis, sin API key)
+      const s=songs.find(x=>x.fileId===fileId);
+      if(s && s.artist && s.artist!=='Desconocido'){
+        const itunesUrl=await _fetchCoverFromItunes(s.artist,s.album,s.title);
+        if(itunesUrl){
+          _coverCache[fileId]=itunesUrl;
+          _applycover(fileId,itunesUrl);
+          if(currentUser) _supabase.from('songs').update({cover_url:itunesUrl}).eq('id',s.id).then(()=>{});
+          return;
+        }
+      }
+      _coverCache[fileId]='none';
+    }
   })
-  .catch(()=>{_coverPending[fileId]=false;_coverCache[fileId]='none';});
+  .catch(async ()=>{
+    _coverPending[fileId]=false;
+    // Intentar iTunes incluso si falló la descarga del MP3
+    const s=songs.find(x=>x.fileId===fileId);
+    if(s && s.artist && s.artist!=='Desconocido'){
+      const itunesUrl=await _fetchCoverFromItunes(s.artist,s.album,s.title);
+      if(itunesUrl){
+        _coverCache[fileId]=itunesUrl;
+        _applycover(fileId,itunesUrl);
+        if(currentUser) _supabase.from('songs').update({cover_url:itunesUrl}).eq('id',s.id).then(()=>{});
+        return;
+      }
+    }
+    _coverCache[fileId]='none';
+  });
+}
+
+// Busca carátula en iTunes Search API — gratis, sin API key, muy rápido
+const _itunesCache={};
+async function _fetchCoverFromItunes(artist, album, title){
+  const q=(album&&album!=='Sin álbum'&&album!=='Google Drive')
+    ?(artist+' '+album)
+    :(artist+' '+title);
+  const key=q.toLowerCase().trim();
+  if(_itunesCache[key]!==undefined) return _itunesCache[key]||null;
+  try{
+    const url='https://itunes.apple.com/search?term='+encodeURIComponent(q)+'&entity=album&limit=3&media=music';
+    const r=await fetch(url,{signal:AbortSignal.timeout(5000)});
+    if(!r.ok){_itunesCache[key]=false;return null;}
+    const data=await r.json();
+    if(data.results&&data.results.length){
+      // Tomar resultado con mayor coincidencia de artista
+      const best=data.results.find(x=>(x.artistName||'').toLowerCase().includes(artist.toLowerCase()))
+        ||data.results[0];
+      const art=(best.artworkUrl100||'').replace('100x100bb','500x500bb');
+      if(art){_itunesCache[key]=art;return art;}
+    }
+    _itunesCache[key]=false;
+  }catch(e){_itunesCache[key]=false;}
+  return null;
 }
 
 function _initCoverObserver(){
@@ -4715,20 +4792,20 @@ function _initCoverObserver(){
             // Primera vez — intentar descargar carátula
             _loadID3Cover(fileId,accountKey);
           } else if(_coverCache[fileId]==='none'){
-            // Sin carátula confirmado — reintentar si hay token activo (puede haber sido renovado)
-            const hasToken = Object.keys(connectedClouds).some(k=>k.startsWith('_tok_')&&connectedClouds[k]);
             const s=songs.find(x=>x.fileId===fileId);
             if(s&&s.coverUrl){
-              // La BD tiene cover aunque el cache diga 'none' — actualizar cache y aplicar
               _coverCache[fileId]=s.coverUrl;
               _applycover(fileId,s.coverUrl);
-            } else if(hasToken){
-              // Hay token — reintentar descarga de carátula
-              delete _coverCache[fileId];
-              delete _coverPending[fileId];
-              _loadID3Cover(fileId,accountKey);
+            } else if(s&&s.artist&&s.artist!=='Desconocido'){
+              // Intentar iTunes como última opción si no se descargó antes
+              _fetchCoverFromItunes(s.artist,s.album,s.title).then(url=>{
+                if(url){
+                  _coverCache[fileId]=url;
+                  _applycover(fileId,url);
+                  if(currentUser) _supabase.from('songs').update({cover_url:url}).eq('id',s.id).then(()=>{});
+                }
+              });
             }
-            // Si no hay token, no reintentamos
           } else {
             // Tenemos carátula en cache — aplicarla directamente
             _applycover(fileId,_coverCache[fileId]);
