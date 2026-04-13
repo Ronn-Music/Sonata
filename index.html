@@ -2314,6 +2314,7 @@ function loginSuccess(user){
   currentUser={
     id:user.id,
     name:user.user_metadata?.display_name||user.user_metadata?.name||user.user_metadata?.full_name||user.email.split('@')[0],
+    display_name:null, // se carga desde profiles table en initApp
     email:user.email,
     avatar:_savedAvatar||null,
     user_metadata: user.user_metadata || {}
@@ -2405,6 +2406,7 @@ async function initApp(){
   // Cargar nubes y playlists (rápido — pocas filas)
   await loadClouds();
   await loadPlaylists();
+  await loadProfile();
   updateStats();
   renderClouds(); renderPlaylists();
 
@@ -4951,14 +4953,26 @@ async function cleanDuplicates(){
 }
 
 // ══ CONFIGURACIÓN — PERFIL ══
+async function loadProfile(){
+  if(!currentUser) return;
+  const { data } = await _supabase.from('profiles').select('display_name').eq('id', currentUser.id).maybeSingle();
+  if(data && data.display_name){
+    currentUser.display_name = data.display_name;
+    currentUser.name = data.display_name;
+    const un = document.getElementById('userName');
+    if(un) un.textContent = data.display_name;
+    const gr = document.getElementById('homeGreeting');
+    if(gr) gr.textContent = 'Hola, '+data.display_name.split(' ')[0]+' 👋';
+  }
+}
+
 function renderSettingsProfile(){
   if(!currentUser) return;
-  const meta = currentUser.user_metadata || {};
   const emailEl = document.getElementById('cfgEmail');
   if(emailEl) emailEl.textContent = currentUser.email || '—';
   const nameInput = document.getElementById('cfgDisplayName');
-  if(nameInput) nameInput.value = meta.display_name || meta.full_name || meta.name || '';
-  _renderCfgAvatar(_loadAvatar() || null, meta.display_name || meta.full_name || currentUser.email || '?');
+  if(nameInput) nameInput.value = currentUser.display_name || currentUser.name || '';
+  _renderCfgAvatar(_loadAvatar() || null, currentUser.display_name || currentUser.name || currentUser.email || '?');
 }
 
 function _renderCfgAvatar(url, fallbackName){
@@ -4978,16 +4992,15 @@ async function saveDisplayName(){
   const name = (input ? input.value : '').trim();
   if(!name){ if(msg){msg.style.color='var(--red)';msg.textContent='El nombre no puede estar vacío.';} return; }
   if(msg){msg.style.color='var(--text3)';msg.textContent='Guardando...';}
-  const { error } = await _supabase.auth.updateUser({ data: { display_name: name, full_name: name, name: name } });
+  const { error } = await _supabase.from('profiles').upsert({
+    id: currentUser.id,
+    display_name: name,
+    updated_at: new Date().toISOString()
+  });
   if(error){
     if(msg){msg.style.color='var(--red)';msg.textContent='Error: '+error.message;}
   } else {
-    // Actualizar currentUser en memoria para que no se pierda al volver a la pantalla
-    if(currentUser && currentUser.user_metadata){
-      currentUser.user_metadata.display_name = name;
-      currentUser.user_metadata.full_name = name;
-      currentUser.user_metadata.name = name;
-    }
+    currentUser.display_name = name;
     currentUser.name = name;
     if(msg){msg.style.color='var(--green)';msg.textContent='✓ Nombre actualizado';}
     const un = document.getElementById('userName');
