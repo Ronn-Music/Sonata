@@ -2743,39 +2743,19 @@ function _showRLSBanner(){
   if(homeSongsList){
     homeSongsList.innerHTML =
       '<div style="padding:24px 20px;text-align:left;color:var(--text2);line-height:1.8;background:rgba(251,191,36,0.07);border:1px solid rgba(251,191,36,0.2);border-radius:14px;margin:4px">'
-      + '<div style="font-size:1.2rem;margin-bottom:8px">⚠ Problema de permisos en Supabase</div>'
-      + '<div style="font-size:0.82rem;color:var(--text3);margin-bottom:14px">Las canciones están guardadas en la base de datos pero Supabase no te permite leerlas.<br>Esto se debe a que falta una política <b>SELECT</b> en Row Level Security (RLS).</div>'
-      + '<div style="font-size:0.8rem;font-weight:700;margin-bottom:8px;color:var(--yellow)">Solución — agregar política en Supabase:</div>'
-      + '<div style="font-size:0.78rem;color:var(--text2);font-family:monospace;background:var(--bg3);padding:12px;border-radius:8px;margin-bottom:14px;word-break:break-all">'
-      + 'Ve a <b>supabase.com</b> → tu proyecto → <b>Table Editor</b> → tabla <b>songs</b><br>'
-      + '→ <b>RLS</b> → <b>Add policy</b> → For: <b>SELECT</b><br>'
-      + '→ Using expression: <code>auth.uid() = user_id</code>'
+      + '<div style="font-size:1.2rem;margin-bottom:8px">⚠ Problema en Supabase — ejecuta este SQL</div>'
+      + '<div style="font-size:0.82rem;color:var(--text3);margin-bottom:12px">Faltan el índice único y/o las políticas RLS en la tabla <b>songs</b>. Sin esto el escaneo guarda solo parte de las canciones.</div>'
+      + '<div style="font-size:0.8rem;font-weight:700;margin-bottom:8px;color:var(--yellow)">Ve a Supabase → SQL Editor → pega y ejecuta:</div>'
+      + '<div style="font-family:monospace;font-size:0.74rem;background:var(--bg3);padding:14px 16px;border-radius:10px;margin-bottom:14px;white-space:pre;overflow-x:auto;color:var(--text2);line-height:1.7">'
+      + '-- Índice único (necesario para que el UPSERT funcione)\nCREATE UNIQUE INDEX IF NOT EXISTS songs_user_filepath_idx\n  ON public.songs(user_id, file_path);\n\n'
+      + '-- Política INSERT\nDO $$ BEGIN\n  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname=\'insert_own_songs\' AND tablename=\'songs\') THEN\n    CREATE POLICY "insert_own_songs" ON public.songs FOR INSERT WITH CHECK (auth.uid() = user_id);\n  END IF;\nEND $$;\n\n'
+      + '-- Política UPDATE\nDO $$ BEGIN\n  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname=\'update_own_songs\' AND tablename=\'songs\') THEN\n    CREATE POLICY "update_own_songs" ON public.songs FOR UPDATE USING (auth.uid() = user_id);\n  END IF;\nEND $$;\n\n'
+      + '-- Política SELECT\nDO $$ BEGIN\n  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname=\'read_own_songs\' AND tablename=\'songs\') THEN\n    CREATE POLICY "read_own_songs" ON public.songs FOR SELECT USING (auth.uid() = user_id);\n  END IF;\nEND $$;'
       + '</div>'
-      + '<div style="font-size:0.78rem;color:var(--text3);margin-bottom:14px">O ve a <b>SQL Editor</b> y ejecuta:<br>'
-      + '<code style="background:var(--bg3);padding:4px 8px;border-radius:6px;display:inline-block;margin-top:4px">CREATE POLICY \"read_own_songs\" ON songs FOR SELECT USING (auth.uid() = user_id);</code></div>'
-      + '<button onclick="loadSongsFromDB().then(renderAll)" style="background:var(--accent);border:none;border-radius:10px;color:white;padding:10px 22px;font-family:Syne,sans-serif;font-weight:700;font-size:0.85rem;cursor:pointer">↻ Reintentar después de aplicar</button>'
+      + '<button onclick="_rescanAllClouds()" style="background:var(--accent);border:none;border-radius:10px;color:white;padding:10px 22px;font-family:Syne,sans-serif;font-weight:700;font-size:0.85rem;cursor:pointer;margin-right:10px">↻ Re-escanear</button>'
+      + '<button onclick="loadSongsFromDB().then(renderAll)" style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;color:var(--text);padding:10px 22px;font-family:Syne,sans-serif;font-weight:600;font-size:0.85rem;cursor:pointer">↻ Recargar biblioteca</button>'
       + '</div>';
   }
-}
-
-function _showUpsertErrorBanner(errMsg){
-  const homeSongsList = document.getElementById('homeSongsList');
-  if(!homeSongsList) return;
-  homeSongsList.innerHTML =
-    '<div style="padding:24px 20px;text-align:left;color:var(--text2);line-height:1.8;background:rgba(248,113,113,0.07);border:1px solid rgba(248,113,113,0.25);border-radius:14px;margin:4px">'
-    + '<div style="font-size:1.2rem;margin-bottom:8px">❌ Error al guardar canciones</div>'
-    + '<div style="font-size:0.82rem;color:var(--text3);margin-bottom:12px">Supabase devolvió: <code style="color:var(--red)">'+(errMsg||'500 Internal Server Error')+'</code><br>'
-    + 'Esto ocurre cuando falta el <b>índice único</b> <code>(user_id, file_path)</code> en la tabla <code>songs</code>, o faltan políticas de INSERT/UPDATE en RLS.</div>'
-    + '<div style="font-size:0.8rem;font-weight:700;margin-bottom:8px;color:var(--yellow)">Solución — ejecuta este SQL en Supabase → SQL Editor:</div>'
-    + '<div style="font-family:monospace;font-size:0.75rem;background:var(--bg3);padding:14px;border-radius:8px;margin-bottom:14px;white-space:pre-wrap;color:var(--text2)">'
-    + '-- 1. Índice único (necesario para UPSERT)\nCREATE UNIQUE INDEX IF NOT EXISTS songs_user_filepath_idx\n  ON songs(user_id, file_path);\n\n'
-    + '-- 2. Política INSERT\nCREATE POLICY IF NOT EXISTS "insert_own_songs"\n  ON songs FOR INSERT\n  WITH CHECK (auth.uid() = user_id);\n\n'
-    + '-- 3. Política UPDATE\nCREATE POLICY IF NOT EXISTS "update_own_songs"\n  ON songs FOR UPDATE\n  USING (auth.uid() = user_id);\n\n'
-    + '-- 4. Política SELECT\nCREATE POLICY IF NOT EXISTS "read_own_songs"\n  ON songs FOR SELECT\n  USING (auth.uid() = user_id);'
-    + '</div>'
-    + '<button onclick="_rescanAllClouds()" style="background:var(--accent);border:none;border-radius:10px;color:white;padding:10px 22px;font-family:Syne,sans-serif;font-weight:700;font-size:0.85rem;cursor:pointer;margin-right:10px">↻ Re-escanear</button>'
-    + '<button onclick="loadSongsFromDB().then(renderAll)" style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;color:var(--text);padding:10px 22px;font-family:Syne,sans-serif;font-weight:600;font-size:0.85rem;cursor:pointer">↻ Recargar biblioteca</button>'
-    + '</div>';
 }
 
 // ── Detecta biblioteca vacía con nubes conectadas y ofrece escanear ──
@@ -4223,16 +4203,11 @@ async function scanGDrive(token, accountKey, deleteFirst=true){
       return parentPath ? parentPath+'/'+folder.name : folder.name;
     }
 
-    // ── PASO 4: Borrar y guardar canciones con folder_path ──
+    // ── PASO 4: Guardar canciones en Supabase ──
     toast('⏳ '+allFiles.length+' canciones — guardando...');
 
-    // UPSERT — nunca borra canciones. Cada cuenta tiene prefijo único en file_path.
-    let saved=0; const BATCH=100;
-    // Detectar si el upsert por onConflict funciona (requiere índice único en BD)
-    // Si falla con 500, hacer fallback: delete+insert por file_path
-    let upsertMode = 'upsert'; // 'upsert' | 'delete_insert'
-
-    const buildRows = (lote) => lote.map(file=>{
+    // Construir row a partir de un file de Drive
+    const buildRow = (file) => {
       const nombre=file.name.replace(/\.(mp3|flac|wav|ogg|m4a|mp4)$/i,'');
       const partes=nombre.split(' - ');
       const artista=partes.length>1?partes[0].trim():'Desconocido';
@@ -4254,53 +4229,56 @@ async function scanGDrive(token, accountKey, deleteFirst=true){
         folder_path:folderPath||null,
         folder_id:parentId||null
       };
-    });
+    };
 
-    for(let i=0;i<allFiles.length;i+=BATCH){
-      const lote=allFiles.slice(i,i+BATCH);
-      const rows=buildRows(lote);
+    // Guardar un lote con estrategia: upsert → insert ignoreDuplicates → insert one-by-one
+    async function _saveLote(rows){
+      // Intento 1: upsert con onConflict (requiere índice único en BD)
+      const{error:e1}=await _supabase.from('songs')
+        .upsert(rows,{onConflict:'user_id,file_path',ignoreDuplicates:false});
+      if(!e1) return rows.length;
 
-      if(upsertMode === 'upsert'){
-        // Intento 1: upsert con onConflict (requiere índice único en BD)
-        const{error}=await _supabase.from('songs')
-          .upsert(rows,{onConflict:'user_id,file_path',ignoreDuplicates:false});
-        if(error){
-          console.warn('Upsert falló ('+error.message+') — cambiando a modo delete+insert');
-          if(i===0) _showUpsertErrorBanner(error.message); // mostrar banner solo en el primer fallo
-          upsertMode = 'delete_insert';
-          i -= BATCH; // reintentar este lote en modo fallback
-          continue;
-        }
-        saved+=lote.length;
-      } else {
-        // Fallback: eliminar las canciones de este lote por file_path, luego insertar
-        const filePaths = rows.map(r=>r.file_path);
-        await _supabase.from('songs')
-          .delete().eq('user_id',currentUser.id).in('file_path',filePaths);
-        const{error:insErr}=await _supabase.from('songs').insert(rows);
-        if(insErr){
-          console.error('Insert fallback lote '+i+':',insErr.message);
-          // Si falla también insert, intentar de uno en uno para no perder el lote
-          let savedInBatch=0;
-          for(const row of rows){
-            await _supabase.from('songs').delete()
-              .eq('user_id',currentUser.id).eq('file_path',row.file_path);
-            const{error:e2}=await _supabase.from('songs').insert([row]);
-            if(!e2) savedInBatch++;
-          }
-          saved+=savedInBatch;
-          if(savedInBatch < rows.length)
-            toast('⚠ '+(rows.length-savedInBatch)+' canciones no guardadas en lote '+Math.floor(i/BATCH+1));
-        } else {
-          saved+=lote.length;
+      console.warn('Upsert falló, probando insert ignoreDuplicates:', e1.message);
+      // Intento 2: insert ignorando duplicados
+      const{error:e2}=await _supabase.from('songs')
+        .insert(rows,{ignoreDuplicates:true});
+      if(!e2) return rows.length;
+
+      console.warn('Insert lote falló, probando de uno en uno:', e2.message);
+      // Intento 3: insertar de uno en uno para no perder el lote completo
+      let ok=0;
+      for(const row of rows){
+        const{error:e3}=await _supabase.from('songs')
+          .upsert([row],{onConflict:'user_id,file_path',ignoreDuplicates:true});
+        if(!e3) ok++;
+        else{
+          // Último recurso: delete+insert
+          await _supabase.from('songs').delete()
+            .eq('user_id',currentUser.id).eq('file_path',row.file_path);
+          const{error:e4}=await _supabase.from('songs').insert([row]);
+          if(!e4) ok++;
+          else console.error('No se pudo guardar:', row.file_path, e4.message);
         }
       }
-
-      if(i%(BATCH*5)===0&&i>0) toast('⏳ '+saved+'/'+allFiles.length+'...');
-      // Pequeña pausa para no saturar Supabase
-      await new Promise(r=>setTimeout(r,30));
+      return ok;
     }
-    toast('✓ '+saved+' de '+allFiles.length+' canciones guardadas');
+
+    let saved=0, failed=0;
+    const BATCH=50; // Lotes más pequeños = menos timeouts
+    for(let i=0;i<allFiles.length;i+=BATCH){
+      const lote=allFiles.slice(i,i+BATCH);
+      const rows=lote.map(buildRow);
+      const ok=await _saveLote(rows);
+      saved+=ok;
+      failed+=(lote.length-ok);
+      if(i%(BATCH*4)===0&&i>0)
+        toast('⏳ '+saved+'/'+allFiles.length+' guardadas...');
+      // Pausa breve entre lotes para no saturar Supabase
+      await new Promise(r=>setTimeout(r,80));
+    }
+    const failMsg=failed>0?' (⚠ '+failed+' fallaron)':'';
+    toast('✓ '+saved+' de '+allFiles.length+' canciones guardadas'+failMsg);
+    if(failed > 0) _showRLSBanner();
 
     // Verificación post-scan: comprobar que el SELECT devuelve las canciones recién insertadas
     if(saved > 0){
@@ -4309,6 +4287,7 @@ async function scanGDrive(token, accountKey, deleteFirst=true){
       if(verifErr){
         console.error('Verificación post-scan error:',verifErr.message);
         toast('⚠ Canciones guardadas pero error al leer: '+verifErr.message);
+        _showRLSBanner();
       } else if(!verif||!verif.length){
         console.warn('POST-SCAN VERIFY: 0 rows devueltas — posible problema de RLS en Supabase.');
         toast('⚠ Guardadas pero no se leen — falta política SELECT en Supabase RLS');
