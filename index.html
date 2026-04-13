@@ -2313,9 +2313,10 @@ function loginSuccess(user){
   const _savedAvatar = (()=>{ try{ return localStorage.getItem('snt_avatar_'+user.id); }catch(e){ return null; } })();
   currentUser={
     id:user.id,
-    name:user.user_metadata?.name||user.user_metadata?.full_name||user.email.split('@')[0],
+    name:user.user_metadata?.display_name||user.user_metadata?.name||user.user_metadata?.full_name||user.email.split('@')[0],
     email:user.email,
-    avatar:_savedAvatar||null
+    avatar:_savedAvatar||null,
+    user_metadata: user.user_metadata || {}
   };
   // Primero cambiar pantalla visualmente
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
