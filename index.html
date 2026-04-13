@@ -3752,7 +3752,7 @@ function startProg(){
   stopProg();
   progInterval=setInterval(()=>{
     if(!isPlaying) return;
-    progress++; if(progress>=songDuration){ if(isRepeat){progress=0;return;} nextSong(); return; }
+    progress++; if(progress>=songDuration){ if(isRepeat){progress=0;return;} if(!audioEl.src||audioEl.src===window.location.href){nextSong();} return; }
     updateProgressUI(); syncNpProgress();
   },1000);
 }
