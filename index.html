@@ -2475,40 +2475,98 @@ async function loadClouds(){
 }
 
 // ── CACHÉ LOCAL ──
-// Usamos versión en la clave para poder invalidar fácilmente.
-// El caché solo se guarda cuando se cargan TODAS las canciones.
-// Durante un scan, el caché se borra para forzar recarga fresca.
-const CACHE_VERSION = 4;
+// ══ CACHÉ con IndexedDB (soporta 8000+ canciones sin límite de 5MB) ══
+// Versión 5: migrado de localStorage → IndexedDB
+const CACHE_VERSION = 5;
+const IDB_NAME = 'sonatta_cache';
+const IDB_STORE = 'songs';
+
+function _idbOpen(){
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = e => {
+      const db = e.target.result;
+      if(!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+    };
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
 function _cacheKey(){ return 'snt_s_' + (currentUser ? currentUser.id : '') + '_v' + CACHE_VERSION; }
 
-function _saveCache(arr){
+async function _saveCache(arr){
   try {
-    localStorage.setItem(_cacheKey(), JSON.stringify(arr));
-    console.log('Cache guardado: ' + arr.length + ' canciones');
-  } catch(e){ console.warn('Cache write failed:', e.message); }
+    const db = await _idbOpen();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put(arr, _cacheKey());
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+    console.log('Cache IDB guardado: ' + arr.length + ' canciones');
+  } catch(e){
+    console.warn('Cache IDB write failed:', e.message);
+    // Fallback a localStorage para catálogos pequeños
+    try { localStorage.setItem(_cacheKey(), JSON.stringify(arr.slice(0,500))); } catch(e2){}
+  }
 }
 
-function _loadCache(){
+async function _loadCache(){
   try {
-    const raw = localStorage.getItem(_cacheKey());
-    if(!raw) return null;
-    const arr = JSON.parse(raw);
-    return (Array.isArray(arr) && arr.length > 0) ? arr : null;
-  } catch(e){ return null; }
+    const db = await _idbOpen();
+    const arr = await new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const req = tx.objectStore(IDB_STORE).get(_cacheKey());
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    db.close();
+    if(Array.isArray(arr) && arr.length > 0) return arr;
+    // Intentar fallback de localStorage (migración desde v4)
+    const raw = localStorage.getItem('snt_s_' + (currentUser ? currentUser.id : '') + '_v4');
+    if(raw){ const a = JSON.parse(raw); return (Array.isArray(a) && a.length > 0) ? a : null; }
+    return null;
+  } catch(e){
+    // Fallback a localStorage si IndexedDB no disponible
+    try {
+      const raw = localStorage.getItem(_cacheKey());
+      if(!raw) return null;
+      const arr = JSON.parse(raw);
+      return (Array.isArray(arr) && arr.length > 0) ? arr : null;
+    } catch(e2){ return null; }
+  }
 }
 
-function _clearCache(){
-  // Borrar TODAS las versiones del caché para este usuario
+async function _clearCache(){
   try {
+    const db = await _idbOpen();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      const store = tx.objectStore(IDB_STORE);
+      const uid = currentUser ? currentUser.id : '';
+      // Borrar todas las versiones de este usuario
+      const req = store.openCursor();
+      req.onsuccess = e => {
+        const cursor = e.target.result;
+        if(cursor){
+          if(cursor.key.includes(uid)) cursor.delete();
+          cursor.continue();
+        }
+      };
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+    // Limpiar también localStorage legacy
     const uid = currentUser ? currentUser.id : '';
-    const toRemove = [];
-    for(let i = 0; i < localStorage.length; i++){
+    for(let i = localStorage.length - 1; i >= 0; i--){
       const k = localStorage.key(i);
-      if(k && (k.startsWith('snt_s_' + uid) || k.startsWith('sonatta_songs_' + uid))) toRemove.push(k);
+      if(k && (k.startsWith('snt_s_' + uid) || k.startsWith('sonatta_songs_' + uid))) localStorage.removeItem(k);
     }
-    toRemove.forEach(k => localStorage.removeItem(k));
-    console.log('Cache limpiado (' + toRemove.length + ' claves borradas)');
-  } catch(e){}
+    console.log('Cache IDB limpiado');
+  } catch(e){ console.warn('Cache clear failed:', e); }
 }
 
 // ── Consulta una página de canciones con retry si hay timeout ──
@@ -2577,7 +2635,7 @@ async function loadSongsFromDB(){
   }, 12000);
 
   // ── PASO 1: mostrar caché inmediatamente si existe ──
-  const cached = _loadCache();
+  const cached = await _loadCache();
   if(cached){
     clearTimeout(_safetyTimer);
     songs = cached;
@@ -3333,6 +3391,16 @@ async function playSongById(id){
   const idx=songs.findIndex(s=>String(s.id)===String(id));
   if(idx===-1) return;
 
+  // ── PROTECCIÓN: verificar sesión activa antes de reproducir ──
+  if(!currentUser){
+    toast('🔒 Inicia sesión para reproducir'); return;
+  }
+  // Verificación ligera de sesión (solo si no tenemos token en memoria)
+  if(!Object.keys(connectedClouds).some(k=>k.startsWith('_tok_')&&connectedClouds[k])){
+    const {data:{session}} = await _supabase.auth.getSession().catch(()=>({data:{session:null}}));
+    if(!session){ toast('🔒 Sesión expirada — vuelve a iniciar sesión'); showScreen('welcomeScreen'); return; }
+  }
+
   // Guard: si ya hay una carga en curso, cancelarla antes de iniciar la nueva
   _playRequestId++;
   const myRequestId = _playRequestId;
@@ -4084,7 +4152,7 @@ async function saveGDriveToken(accessToken, expiresIn, refreshToken=null){
 // and query MusicBrainz API to get cover art. This runs async after scan.
 async function scanGDrive(token, accountKey, deleteFirst=true){
   toast('⏳ Escaneando Google Drive...');
-  _clearCache(); // Limpiar caché para forzar recarga después del scan
+  await _clearCache(); // Limpiar caché para forzar recarga después del scan
   try {
     // ── PASO 1: Escanear todos los archivos de audio con su parent ──
     let allFiles=[],pageToken=null,pagina=1;
