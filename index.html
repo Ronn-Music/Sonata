@@ -2249,11 +2249,12 @@ function showView(name, navEl){
   const v=document.getElementById('view-'+name); if(v) v.classList.add('active');
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   if(navEl&&navEl.classList&&navEl.classList.contains('nav-item')) navEl.classList.add('active');
-  if(name==='clouds')    renderClouds();
-  if(name==='folders')   renderFolders();
-  if(name==='liked')     renderLiked();
-  if(name==='accounts')  renderAccounts();
-  if(name==='settings')  setTimeout(renderSettingsProfile, 50);
+  if(name==='clouds')     renderClouds();
+  if(name==='folders')    renderFolders();
+  if(name==='liked')      renderLiked();
+  if(name==='accounts')   renderAccounts();
+  if(name==='playlists')  renderPlaylists();
+  if(name==='settings')   setTimeout(renderSettingsProfile, 50);
 }
 
 // ══ AUTH ══
@@ -3309,15 +3310,23 @@ function renderClouds(){
   });
   el.innerHTML=html;
 }
-function renderPlaylists(){
+async function renderPlaylists(){
   const el=document.getElementById('playlistsGrid'); if(!el) return;
   const colors=['#1a1a35','#2a1a35','#1a3525','#35251a'];
-  let html=playlists.map(p=>
-    '<div class="playlist-card" onclick="viewPlaylist(\''+p.id+'\')">'
-    +'<div class="playlist-art">'+colors.map(c=>'<div class="playlist-art-q" style="background:'+c+'">🎵</div>').join('')+'</div>'
-    +'<div class="playlist-info"><div class="playlist-name">'+p.name+'</div><div class="playlist-count">0 canciones</div></div>'
-    +'</div>'
-  ).join('');
+  // Obtener conteo real de canciones por playlist
+  let counts={};
+  if(playlists.length){
+    const{data:countRows}=await _supabase.from('playlist_songs')
+      .select('playlist_id').in('playlist_id',playlists.map(p=>p.id));
+    if(countRows) countRows.forEach(r=>{ counts[r.playlist_id]=(counts[r.playlist_id]||0)+1; });
+  }
+  let html=playlists.map(p=>{
+    const n=counts[p.id]||0;
+    return '<div class="playlist-card" onclick="viewPlaylist(\''+p.id+'\''+')">'
+      +'<div class="playlist-art">'+colors.map(c=>'<div class="playlist-art-q" style="background:'+c+'">🎵</div>').join('')+'</div>'
+      +'<div class="playlist-info"><div class="playlist-name">'+p.name+'</div><div class="playlist-count">'+n+' canción'+(n!==1?'es':'')+'</div></div>'
+      +'</div>';
+  }).join('');
   html+='<div class="new-playlist-btn" onclick="createPlaylist()">'
     +'<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>'
     +'Nueva playlist</div>';
@@ -3754,11 +3763,55 @@ async function addToPlaylist(songId, playlistId){
     playlistId=playlists[idx].id;
   }
   const pl=playlists.find(p=>String(p.id)===String(playlistId));
+  // Verificar si ya está en la playlist
+  const{data:existing}=await _supabase.from('playlist_songs')
+    .select('id').eq('playlist_id',playlistId).eq('song_id',songId).maybeSingle();
+  if(existing){ toast('Ya está en "'+(pl?pl.name:'playlist')+'"'); return; }
+  // Guardar en Supabase
+  const{error}=await _supabase.from('playlist_songs')
+    .insert({playlist_id:playlistId, song_id:songId, user_id:currentUser.id});
+  if(error){ toast('Error al agregar: '+error.message); return; }
   toast('✓ Agregado a "'+(pl?pl.name:'playlist')+'"');
 }
 function showAddToPlaylistModal(){
   if(currentSongIdx===-1) return;
   addToPlaylist(songs[currentSongIdx].id, null);
+}
+async function viewPlaylist(id){
+  const pl=playlists.find(p=>String(p.id)===String(id));
+  if(!pl) return;
+  const el=document.getElementById('playlistsGrid');
+  el.innerHTML='<div style="color:var(--text2);font-size:0.85rem;padding:8px 0">Cargando canciones...</div>';
+  const{data:rows,error}=await _supabase.from('playlist_songs')
+    .select('song_id').eq('playlist_id',id);
+  if(error){ el.innerHTML='<div style="color:red">Error: '+error.message+'</div>'; return; }
+  const ids=(rows||[]).map(r=>r.song_id);
+  const plSongs=songs.filter(s=>ids.includes(s.id));
+  const colors=['#1a1a35','#2a1a35','#1a3525','#35251a'];
+  let html='<div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;grid-column:1/-1">'
+    +'<button onclick="renderPlaylists()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:1.1rem;padding:4px 8px;border-radius:8px;display:flex;align-items:center;gap:6px">← Volver</button>'
+    +'<span style="font-size:1.1rem;font-weight:600;color:var(--text1)">'+pl.name+'</span>'
+    +'<span style="font-size:0.82rem;color:var(--text2)">'+plSongs.length+' canción'+(plSongs.length!==1?'es':'')+'</span>'
+    +'</div>';
+  if(!plSongs.length){
+    html+='<div style="grid-column:1/-1;color:var(--text2);font-size:0.9rem;padding:20px 0">Esta playlist está vacía. Agrega canciones desde el menú ⋮ de cualquier canción.</div>';
+  } else {
+    html+='<div class="songs-list" style="grid-column:1/-1">'
+      +'<div class="songs-list-header"><span>#</span><span>Título</span><span>Artista</span><span>Álbum</span><span>Duración</span><span></span></div>'
+      +plSongs.map((s,i)=>{
+        const cover=s.cover_url?'<img src="'+s.cover_url+'" style="width:34px;height:34px;border-radius:6px;object-fit:cover">'
+          :'<div style="width:34px;height:34px;border-radius:6px;background:'+colors[i%colors.length]+';display:flex;align-items:center;justify-content:center;font-size:0.9rem">🎵</div>';
+        return '<div class="song-row" data-songid="'+s.id+'" style="cursor:pointer">'
+          +'<span class="song-num">'+(i+1)+'</span>'
+          +'<span style="display:flex;align-items:center;gap:10px">'+cover+'<span>'+s.title+'</span></span>'
+          +'<span class="song-artist">'+s.artist+'</span>'
+          +'<span class="song-album" style="color:var(--text2);font-size:0.82rem">'+(s.album||'—')+'</span>'
+          +'<span class="song-dur">'+fmt(s.duration||0)+'</span>'
+          +'<span></span></div>';
+      }).join('')
+      +'</div>';
+  }
+  el.innerHTML=html;
 }
 
 function startProg(){
@@ -4449,7 +4502,7 @@ async function createPlaylist(){
   if(error){toast('Error al crear playlist');return;}
   playlists.push(data); renderPlaylists(); toast('✓ Playlist "'+name+'" creada');
 }
-function viewPlaylist(id){ toast('Playlists próximamente disponibles'); }
+// viewPlaylist is defined above near addToPlaylist
 
 // ══ MOBILE NAV ══
 function toggleMobileSidebar(){
