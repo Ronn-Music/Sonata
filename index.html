@@ -2712,13 +2712,8 @@ async function loadSongsFromDB(){
   renderHomeSongs(); renderRecentGrid(); updateStats();
   if(window._activateTouchOnButtons) setTimeout(window._activateTouchOnButtons, 100);
 
-  if(firstPage.length < PAGE){
-    _saveCache(songs);
-    toast('✓ ' + songs.length + ' canciones listas');
-    return;
-  }
-
-  // Hay más páginas — cargar el resto en background
+  // Siempre cargar el resto — no asumir que firstPage.length < PAGE significa última página
+  // (Supabase puede tener max_rows configurado menor que PAGE)
   toast('⏳ ' + songs.length + ' canciones — cargando más...');
   _loadAllFromSupabase(PAGE, (n) => {
     if(countEl) countEl.textContent = n + ' ↓';
