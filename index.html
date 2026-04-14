@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎵</text></svg>">
 <title>Sonatta — Tu música en las nubes</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet">
@@ -2313,9 +2314,11 @@ function loginSuccess(user){
   const _savedAvatar = (()=>{ try{ return localStorage.getItem('snt_avatar_'+user.id); }catch(e){ return null; } })();
   currentUser={
     id:user.id,
-    name:user.user_metadata?.name||user.user_metadata?.full_name||user.email.split('@')[0],
+    // FIX: incluir display_name en prioridad y guardar user_metadata completo
+    name:user.user_metadata?.display_name||user.user_metadata?.full_name||user.user_metadata?.name||user.email.split('@')[0],
     email:user.email,
-    avatar:_savedAvatar||null
+    avatar:_savedAvatar||null,
+    user_metadata: user.user_metadata||{}
   };
   // Primero cambiar pantalla visualmente
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
@@ -4994,8 +4997,10 @@ function renderSettingsProfile(){
   const emailEl = document.getElementById('cfgEmail');
   if(emailEl) emailEl.textContent = currentUser.email || '—';
   const nameInput = document.getElementById('cfgDisplayName');
-  if(nameInput) nameInput.value = meta.display_name || meta.full_name || meta.name || '';
-  _renderCfgAvatar(_loadAvatar() || null, meta.display_name || meta.full_name || currentUser.email || '?');
+  // FIX: usar currentUser.name como fallback final — siempre tiene el valor correcto
+  const displayName = meta.display_name || meta.full_name || meta.name || currentUser.name || '';
+  if(nameInput) nameInput.value = displayName;
+  _renderCfgAvatar(_loadAvatar() || null, displayName || currentUser.email || '?');
 }
 
 function _renderCfgAvatar(url, fallbackName){
@@ -5019,12 +5024,11 @@ async function saveDisplayName(){
   if(error){
     if(msg){msg.style.color='var(--red)';msg.textContent='Error: '+error.message;}
   } else {
-    // Actualizar currentUser en memoria para que no se pierda al volver a la pantalla
-    if(currentUser && currentUser.user_metadata){
-      currentUser.user_metadata.display_name = name;
-      currentUser.user_metadata.full_name = name;
-      currentUser.user_metadata.name = name;
-    }
+    // FIX: actualizar currentUser en memoria completamente para que persista al cambiar de pestaña
+    if(!currentUser.user_metadata) currentUser.user_metadata = {};
+    currentUser.user_metadata.display_name = name;
+    currentUser.user_metadata.full_name = name;
+    currentUser.user_metadata.name = name;
     currentUser.name = name;
     if(msg){msg.style.color='var(--green)';msg.textContent='✓ Nombre actualizado';}
     const un = document.getElementById('userName');
