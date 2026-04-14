@@ -2611,6 +2611,8 @@ async function _loadAllFromSupabase(PAGE, onProgress){
   let all = [];
   let from = 0;
   let errors = 0;
+  // Detectar el límite real que devuelve la API (puede ser menor que PAGE si Supabase tiene max_rows configurado)
+  let effectivePageSize = null;
   while(true){
     await new Promise(r => setTimeout(r, 50));
     const result = await _fetchSongsPage(from, PAGE, 1);
@@ -2625,10 +2627,13 @@ async function _loadAllFromSupabase(PAGE, onProgress){
     errors = 0; // FIX: resetear errores solo tras éxito
     const data = result.data || [];
     if(!data.length) break;
+    // Detectar el límite efectivo de la API en el primer lote exitoso
+    if(effectivePageSize === null) effectivePageSize = data.length;
     all = all.concat(_mapSongs(data));
     from += data.length;
     if(onProgress) onProgress(all.length);
-    if(data.length < PAGE) break;
+    // Solo parar si devolvió menos que el límite efectivo (significa última página real)
+    if(data.length < effectivePageSize) break;
   }
   return _dedupSongs(all);
 }
