@@ -2845,20 +2845,20 @@ async function _rescanAllClouds(){
 
 // ── DEDUP EN MEMORIA: elimina duplicados por fileId, conservando el mejor registro ──
 function _dedupSongs(arr){
-  const byFileId={};
-  const noFileId=[];
+  const byKey={};
   arr.forEach(s=>{
-    if(!s.fileId){ noFileId.push(s); return; }
-    const existing=byFileId[s.fileId];
+    // FIX: usar filePath completo como clave — es unico por cuenta+archivo
+    // Antes usaba fileId solo, eliminando canciones validas de diferentes cuentas
+    const key = s.filePath || s.fileId || (s.id+"");
+    const existing=byKey[key];
     if(!existing){
-      byFileId[s.fileId]=s;
+      byKey[key]=s;
     } else {
-      // Conservar el que tenga más datos: cover > duration > liked
-      const score=(x)=>(x.coverUrl?4:0)+(x.duration&&x.duration!=='0:00'?2:0)+(x.liked?1:0);
-      if(score(s)>score(existing)) byFileId[s.fileId]=s;
+      const score=(x)=>(x.coverUrl?4:0)+(x.duration&&x.duration!=="0:00"?2:0)+(x.liked?1:0);
+      if(score(s)>score(existing)) byKey[key]=s;
     }
   });
-  return [...Object.values(byFileId), ...noFileId];
+  return Object.values(byKey);
 }
 
 function _mapSongs(data){
