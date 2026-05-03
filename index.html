@@ -2488,10 +2488,11 @@ const IDB_STORE = 'songs';
 
 function _idbOpen(){
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(IDB_NAME, 1);
+    const req = indexedDB.open(IDB_NAME, 2);
     req.onupgradeneeded = e => {
       const db = e.target.result;
       if(!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+      if(!db.objectStoreNames.contains('covers')) db.createObjectStore('covers');
     };
     req.onsuccess = e => resolve(e.target.result);
     req.onerror = () => reject(req.error);
@@ -2576,9 +2577,35 @@ async function _clearCache(){
 }
 
 // ── Consulta una página de canciones con retry si hay timeout ──
+async function _saveCoverLocal(fileId, dataUrl){
+  if(!fileId || !dataUrl || dataUrl==='none') return;
+  try {
+    const db = await _idbOpen();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('covers', 'readwrite');
+      tx.objectStore('covers').put(dataUrl, fileId);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch(e){}
+}
+async function _loadCoverLocal(fileId){
+  try {
+    const db = await _idbOpen();
+    const dataUrl = await new Promise((resolve, reject) => {
+      const tx = db.transaction('covers', 'readonly');
+      const req = tx.objectStore('covers').get(fileId);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    db.close();
+    return dataUrl || null;
+  } catch(e){ return null; }
+}
 async function _fetchSongsPage(from, size, attempt){
   attempt = attempt || 1;
-  const SELECT = 'id,title,artist,album,duration,file_path,file_url,cloud_provider,account_key,cover_url,liked,folder_path,folder_id';
+  const SELECT = 'id,title,artist,album,duration,file_path,file_url,cloud_provider,account_key,liked,folder_path,folder_id';
   // FIX CRÍTICO: .order('id') es OBLIGATORIO con .range() en Supabase.
   // Sin orden definido, el servidor puede devolver páginas con filas duplicadas
   // o saltar filas entre lotes, causando que miles de canciones no se carguen.
@@ -4558,11 +4585,7 @@ function _applycover(fileId, dataUrl){
       document.getElementById('npModalInitial').style.display='none';
     }
   }
-  const s=songs.find(x=>x.fileId===fileId);
-  if(s&&!s.coverUrl&&currentUser){
-    s.coverUrl=dataUrl;
-    _supabase.from('songs').update({cover_url:dataUrl}).eq('id',s.id).then(()=>{});
-  }
+  // Carátula guardada independientemente en IndexedDB, no inflar el array songs en RAM
 }
 
 function _coverQueueTick(){
@@ -4654,7 +4677,11 @@ function _fetchCover(fileId, accountKey){
   })
   .then(dataUrl=>{
     _coverPending[fileId]=false;
-    if(dataUrl){_coverCache[fileId]=dataUrl;_applycover(fileId,dataUrl);}
+    if(dataUrl){
+      _coverCache[fileId]=dataUrl;
+      _applycover(fileId,dataUrl);
+      _saveCoverLocal(fileId, dataUrl);
+    }
     else{_coverCache[fileId]='none';}
   })
   .catch(()=>{_coverPending[fileId]=false;_coverCache[fileId]='none';});
@@ -4670,19 +4697,20 @@ function _initCoverObserver(){
         const accountKey=el.dataset.ak||null;
         if(fileId){
           if(!_coverCache[fileId]){
-            // Primera vez — intentar descargar carátula
-            _loadID3Cover(fileId,accountKey);
+            // Primera vez — buscar en disco local primero
+            _coverCache[fileId] = 'pending'; // Evitar múltiples peticiones
+            _loadCoverLocal(fileId).then(dataUrl => {
+              if(dataUrl) {
+                _coverCache[fileId] = dataUrl;
+                _applycover(fileId, dataUrl);
+              } else {
+                delete _coverCache[fileId];
+                _loadID3Cover(fileId,accountKey);
+              }
+            });
           } else if(_coverCache[fileId]==='none'){
-            // Sin carátula confirmado — no re-descargar (evita tráfico excesivo con miles de canciones)
-            // Solo reintentar si el song ya no tiene cover marcado (puede cambiar entre sesiones)
-            const s=songs.find(x=>x.fileId===fileId);
-            if(s&&s.coverUrl){
-              // La BD tiene cover aunque el cache diga 'none' — actualizar cache y aplicar
-              _coverCache[fileId]=s.coverUrl;
-              _applycover(fileId,s.coverUrl);
-            }
-            // Si no hay cover en BD tampoco, no reintentamos esta sesión
-          } else {
+            // Sin carátula confirmado
+          } else if(_coverCache[fileId]!=='pending'){
             // Tenemos carátula en cache — aplicarla directamente
             _applycover(fileId,_coverCache[fileId]);
           }
@@ -4789,7 +4817,7 @@ async function startCoverSync(){
           found++;
           song.coverUrl = dataUrl;
           _coverCache[song.fileId] = dataUrl;
-          await _supabase.from('songs').update({cover_url: dataUrl}).eq('id', song.id);
+          _saveCoverLocal(song.fileId, dataUrl);
           _applycover(song.fileId, dataUrl);
         } else {
           failed++;
